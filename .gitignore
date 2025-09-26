@@ -1,0 +1,2 @@
+git rm --cached -r **/__pycache__ || true
+git rm --cached -r *.pyc || true
