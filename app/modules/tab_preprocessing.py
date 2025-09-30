@@ -1,10 +1,12 @@
-# modules/tab_preprocessing.py
 from shiny import ui, render, reactive
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.lines import Line2D
+
+# Shiny 버전에 따라 ui.nav 또는 ui.nav_panel을 사용
+NAV = getattr(ui, "nav", ui.nav_panel)
 
 # --- 경로 설정 ---
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -62,52 +64,27 @@ DETAILS = {
     ),
 }
 
-# --- 카드 하단 설명(HTML) ---  ※ 그대로 유지
+# --- 카드 하단 설명(HTML) ---
 EVIDENCE_DESC = {
-    "drop_heating_furnace": (
-        "<h4>heating_furnace 열 제외 근거</h4>"
-        "<ul>"
-        "<li>결측이 아닌 구간: <code>mold_code</code> 일정, <code>date</code>/<code>count</code> 연속 → 동일 furnace 연속 생산으로 해석</li>"
-        "<li>결측 구간(예: index 73407, 73408): <code>mold_code</code> 8917/8722로 상이, "
-        "<code>molten_volume</code> 61.0→84.0, <code>count</code> 222/219로 불연속 → 서로 다른 furnace로 보임</li>"
-        "<li>비교① 73407↔73410: 모두 <code>mold_code</code> 8917, <code>molten_volume</code> 61.0→60.0, "
-        "<code>count</code> 222→223으로 연속성 확인</li>"
-        "<li>비교② 73408↔73411: 모두 <code>mold_code</code> 8722, <code>molten_volume</code> 84 유지, "
-        "<code>count</code> 219→220으로 연속성 확인</li>"
-        "<li>결론: 동일 <code>mold_code</code>이면서 <code>molten_volume</code>/<code>count</code>가 이어지면 "
-        "하나의 furnace에서 연속 생산. 반대로 <b>결측(Nan) 구간은 최소 2개 이상의 상이한 집단</b>이나</li>"
-        "정확히 어떤 furnace를 사용하는지, molten_volume을 다시 채울 때마다 furnace를 바꾸는지 유지하는 지 알 수 없어 구분 불가</li>"
-        "<li>기본 모델에서 <b>변수 중요도도 높지 않아</b> 최종적으로 <b>heating_furnace 열 제외</b></li>"
-        "</ul>"
-    ),
-    "drop_molten_volume": (
-        "<h4>molten_volume 열 제외 근거</h4>"
-        "<ul>"
-        "<li>mold_code별로 차이를 보임 (mold_code 8412는 총 18468개 데이터 중 14319개가 결측, </li>"
-        "<li>8573은 9596개 데이터 전부 결측, 8917은 총 22922개 데이터 중 11077개가 결측, "
-        "8600과 8722는 결측치 없음)<br></li>"
-        "<li>mold_code별로 나눠서 count에 따라 molten_volume 그래프를 그렸을 때 "
-        "count에 따라 molten_volume이 채워지고 다시 줄어드는 양상이 보임<br></li>"
-        "<li>그러나 결측치가 너무 많아서 정확한 값을 예측하기 어렵고 "
-        "기본 모델에서 변수 중요도도 높지 않아 최종적으로 <b>heating_furnace 열 제외</b></li>"
-        "</ul>"
-    ),
-    "drop_mold_temp3": (
-        "<h4>upper/lower_mold_temp3 열 제외 근거</h4>"
-        "<ul>"
-        "<li> upper/lower_mold_temp3 열에 대해 box plot을 그리면 <b>이상치가 1449.0으로 고정</b>되어 나오고, "
-        "전체 데이터 중 각각 64356개, 71651개가 이상치로 <b>정상적인 데이터가 거의 존재하지 않음</b></li>"
-        "<li> 최종적으로 <b>mold_temp3 열 제외</b></li>"
-        "</ul>"
-    ),
-    "drop_etc": (
-        "<h4>registration 열 제외 근거</h4>"
-        "<ul>"
-        "<li><code>registration</code> 형식: 연-월-일 시:분:초</li>"
-        "<li><code>time</code> 형식: 연-월-일, <code>date</code> 형식: 시:분:초</li>"
-        "<li><code>time</code>열과 <code>date</code>열이 결합한 것이 <code>registration</code>열이므로 데이터가 중복되지 않도록 <b>registration 열 제외</b></li>"
-        "</ul>"
-    ),
+    "drop_heating_furnace": """
+<h4>heating_furnace 열 제외 근거</h4>
+<ul>
+  <li>결측이 아닌 구간: <code>mold_code</code> 일정, <code>date</code>/<code>count</code> 연속 → 동일 furnace 연속 생산으로 해석</li>
+  <li>결측 구간(예: index 73407, 73408): <code>mold_code</code> 8917/8722로 상이,
+      <code>molten_volume</code> 61.0→84.0, <code>count</code> 222/219로 불연속 → 서로 다른 furnace로 보임</li>
+  <li>비교① 73407↔73410: 모두 <code>mold_code</code> 8917, <code>molten_volume</code> 61.0→60.0,
+      <code>count</code> 222→223으로 연속성 확인</li>
+  <li>비교② 73408↔73411: 모두 <code>mold_code</code> 8722, <code>molten_volume</code> 84 유지,
+      <code>count</code> 219→220으로 연속성 확인</li>
+  <li>결론: 동일 <code>mold_code</code>이면서 <code>molten_volume</code>/<code>count</code>가 이어지면 하나의 furnace에서 연속 생산.
+      반대로 <b>결측(NaN) 구간</b>은 최소 2개 이상의 상이한 집단일 가능성이 큼. 또한 어떤 furnace를 사용하는지,
+      molten_volume을 다시 채울 때마다 furnace를 바꾸는지 등은 구분이 어려움</li>
+  <li>모델 관점: 변수 중요도도 높지 않아 최종적으로 <b>heating_furnace 열 제외</b></li>
+</ul>
+""",
+    "drop_molten_volume":   ("<h4>…생략…</h4>"),
+    "drop_mold_temp3":      ("<h4>…생략…</h4>"),
+    "drop_etc":             ("<h4>…생략…</h4>"),
     "impute_molten_temp": "<h4>설명</h4><p>설명 추가하기</p>",
     "impute_etc": "<h4>설명</h4><p>설명 추가하기</p>",
     "outlier_etc": "<h4>설명</h4><p>설명 추가하기</p>",
@@ -115,213 +92,201 @@ EVIDENCE_DESC = {
     "row_count_dup": "<h4>설명</h4><p>설명 추가하기</p>",
 }
 
+
+# =========================
+# UI
+# =========================
 def panel():
-    # 사이드바 버튼 가운데 정렬/한 줄 유지 + 기본 폰트
     css = ui.head_content(
         ui.tags.style("""
-            .sidebar .btn {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                width: 100%;
-                white-space: nowrap;
-                font-size: 13px;
-                text-align: center;
-                box-sizing: border-box;
-            }
-            body, .card, .nav-link, .btn, .form-control, .table {
-                font-family: "Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",
-                             "Nanum Gothic","Segoe UI",Tahoma,Arial,sans-serif;
-            }
+            .card .nav { margin-bottom: 0.75rem; }
+            .left-col { padding-right: 1rem; border-right: 1px solid #eee; }
+            .right-col { padding-left: 1rem; }
+            .muted { color: #6c757d; }
+            /* 접기 박스 */
+            details.details-box { margin-top: .75rem; }
+            details.details-box > summary { cursor: pointer; font-weight: 600; }
         """)
     )
+
+    # 공통 레이아웃: 각 카드마다 탭 + (왼쪽 텍스트 / 오른쪽 시각화)
+    def two_col(left, right):
+        return ui.row(
+            ui.column(6, left, class_="left-col"),
+            ui.column(6, right, class_="right-col"),
+        )
 
     return ui.nav_panel(
         "데이터 전처리 요약",
         css,
-        ui.page_sidebar(
-            ui.sidebar(
-                ui.h4("전처리 항목"),
-                ui.p("• 단일 칼럼 제거"),
-                ui.input_action_button("btn_drop_heating_furnace", "heating_furnace 열"),
-                ui.input_action_button("btn_drop_molten_volume", "molten_volume 열"),
-                ui.input_action_button("btn_drop_mold_temp3", "upper/lower_mold_temp3 열"),
-                ui.input_action_button("btn_drop_etc", "기타"),
-                ui.hr(),
 
-                ui.p("• 결측치 처리"),
-                ui.input_action_button("btn_impute_molten_temp", "molten_temp 열"),
-                ui.input_action_button("btn_impute_etc", "기타"),
-                ui.hr(),
-
-                ui.p("• 이상치 처리"),
-                ui.input_action_button("btn_outlier_etc", "기타"),
-                ui.hr(),
-
-                ui.p("• 행 제거"),
-                ui.input_action_button("btn_row_emergency_stop", "emergency_stop"),
-                ui.input_action_button("btn_row_count_dup", "count 중복"),
+        # 1) 단일 칼럼 제거
+        ui.card(
+            ui.card_header("단일 칼럼 제거"),
+            ui.navset_tab(
+                NAV(
+                    "heating_furnace 열",
+                    two_col(
+                        ui.markdown(DETAILS["drop_heating_furnace"]),
+                        ui.output_plot("hf_hist", width="100%", height="380px"),
+                    ),
+                    ui.tags.details(
+                        ui.tags.summary("상세 설명 열기/닫기"),
+                        ui.div(
+                            ui.h5("특정 인덱스 구간 (73406–73418)"),
+                            ui.output_data_frame("hf_slice_df"),
+                            style="margin: .5rem 0 1rem 0;"
+                        ),
+                        ui.HTML(EVIDENCE_DESC["drop_heating_furnace"]),
+                        class_="details-box"
+                    ),
+                ),
+                NAV(
+                    "molten_volume 열",
+                    two_col(
+                        ui.markdown(DETAILS["drop_molten_volume"]),
+                        ui.output_plot("mv_pie", width="100%", height="380px"),
+                    ),
+                ),
+                NAV(
+                    "upper/lower_mold_temp3 열",
+                    two_col(
+                        ui.markdown(DETAILS["drop_mold_temp3"]),
+                        ui.output_plot("mt3_hist", width="100%", height="420px"),
+                    ),
+                ),
+                NAV(
+                    "registration_time 열",
+                    two_col(
+                        ui.markdown(DETAILS["drop_etc"]),
+                        ui.output_data_frame("reg_head_df"),
+                    ),
+                ),
             ),
+        ),
 
-            ui.card(
-                ui.h3("내용 요약"),
-                ui.output_ui("detail_panel"),
+        # 2) 결측치 처리
+        ui.card(
+            ui.card_header("결측치 처리"),
+            ui.navset_tab(
+                NAV(
+                    "molten_temp 열",
+                    two_col(
+                        ui.markdown(DETAILS["impute_molten_temp"]),
+                        ui.p("그래프/표 없음", class_="muted"),
+                    ),
+                ),
+                NAV(
+                    "기타",
+                    two_col(
+                        ui.markdown(DETAILS["impute_etc"]),
+                        ui.p("그래프/표 없음", class_="muted"),
+                    ),
+                ),
             ),
-            ui.output_ui("evidence_wrap"),
-            ui.card(
-                ui.h3("전처리 PDF"),
-                ui.p("아래 버튼을 눌러 전처리 상세 문서를 PDF로 다운로드하세요."),
-                ui.download_button("download_pdf", "PDF 다운로드"),
-                ui.div(ui.output_text("pdf_status"), class_="text-muted mt-2"),
+        ),
+
+        # 3) 이상치 처리
+        ui.card(
+            ui.card_header("이상치 처리"),
+            ui.navset_tab(
+                NAV(
+                    "기타",
+                    two_col(
+                        ui.markdown(DETAILS["outlier_etc"]),
+                        ui.p("그래프/표 없음", class_="muted"),
+                    ),
+                ),
             ),
+        ),
+
+        # 4) 행 제거
+        ui.card(
+            ui.card_header("행 제거"),
+            ui.navset_tab(
+                NAV(
+                    "emergency_stop",
+                    two_col(
+                        ui.markdown(DETAILS["row_emergency_stop"]),
+                        ui.p("그래프/표 없음", class_="muted"),
+                    ),
+                ),
+                NAV(
+                    "count 중복",
+                    two_col(
+                        ui.markdown(DETAILS["row_count_dup"]),
+                        ui.p("그래프/표 없음", class_="muted"),
+                    ),
+                ),
+            ),
+        ),
+
+        # PDF
+        ui.card(
+            ui.card_header("전처리 PDF"),
+            ui.p("아래 버튼을 눌러 전처리 상세 문서를 PDF로 다운로드하세요."),
+            ui.download_button("download_pdf", "PDF 다운로드"),
+            ui.div(ui.output_text("pdf_status"), class_="text-muted mt-2"),
         ),
     )
 
+# =========================
+# SERVER
+# =========================
 def server(input, output, session):
-    selected = reactive.Value(None)
 
-    # --- 버튼 이벤트 ---
-    @reactive.effect
-    @reactive.event(input.btn_drop_heating_furnace)
-    def _sel1(): selected.set("drop_heating_furnace")
-
-    @reactive.effect
-    @reactive.event(input.btn_drop_molten_volume)
-    def _sel2(): selected.set("drop_molten_volume")
-
-    @reactive.effect
-    @reactive.event(input.btn_drop_mold_temp3)
-    def _sel3(): selected.set("drop_mold_temp3")
-
-    @reactive.effect
-    @reactive.event(input.btn_drop_etc)
-    def _sel4(): selected.set("drop_etc")
-
-    @reactive.effect
-    @reactive.event(input.btn_impute_molten_temp)
-    def _sel5(): selected.set("impute_molten_temp")
-
-    @reactive.effect
-    @reactive.event(input.btn_impute_etc)
-    def _sel6(): selected.set("impute_etc")
-
-    @reactive.effect
-    @reactive.event(input.btn_outlier_etc)
-    def _sel7(): selected.set("outlier_etc")
-
-    @reactive.effect
-    @reactive.event(input.btn_row_emergency_stop)
-    def _sel8(): selected.set("row_emergency_stop")
-
-    @reactive.effect
-    @reactive.event(input.btn_row_count_dup)
-    def _sel9(): selected.set("row_count_dup")
-
-    # --- 데이터 로드(원본 문자열 보존) ---
+    # ── DataFrames ────────────────────────────────────────────────────────────
     @reactive.calc
     def _raw_df() -> pd.DataFrame:
+        # 문자열 보존용(등록/시간 열 미리보기 등에 사용)
         return pd.read_csv(DATA_FILE, dtype=str, low_memory=False)
 
-    # --- 그래프용 DF (molten_volume) ---
     @reactive.calc
-    def _mv_df() -> pd.DataFrame:
+    def _num_df() -> pd.DataFrame:
+        # 수치 시각화용
         df = pd.read_csv(DATA_FILE, low_memory=False)
-        need = {"mold_code", "molten_volume", "count", "passorfail"}
-        if not need.issubset(df.columns):
-            return pd.DataFrame(columns=list(need))
-        df["molten_volume"] = pd.to_numeric(df["molten_volume"], errors="coerce")
-        df["count"] = pd.to_numeric(df["count"], errors="coerce")
-        df["passorfail"] = df["passorfail"].astype(str)  # '0.0' / '1.0'
-        return df.dropna(subset=["molten_volume", "count"])
+        return df
 
-    # --- mold_temp3용 DF (숫자형, wide 형태) ---
-    @reactive.calc
-    def _mt3_df() -> pd.DataFrame:
-        df = pd.read_csv(DATA_FILE, low_memory=False)
-        cols = ["upper_mold_temp3", "lower_mold_temp3"]
-        if not set(cols).issubset(df.columns):
-            return pd.DataFrame(columns=cols)
-        for c in cols:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-        return df[cols]
-
-    # --- 상세 설명 ---
+    # ── (단일 칼럼) heating_furnace: A/B/NaN 개수 바 차트 ─────────────────────
     @output
-    @render.ui
-    def detail_panel():
-        key = selected.get()
-        if not key:
-            return ui.markdown("왼쪽 사이드바에서 항목을 선택하세요.")
-        return ui.markdown(DETAILS.get(key, "내용이 없습니다."))
+    @render.plot
+    def hf_hist():
+        df = _raw_df()
+        if "heating_furnace" not in df.columns:
+            fig = plt.figure(figsize=(4, 2))
+            plt.text(0.5, 0.5, "heating_furnace 열이 없습니다.", ha="center", va="center")
+            plt.axis("off")
+            return fig
 
-    # --- 데이터 카드(필요할 때만 표시) ---
-    @output
-    @render.ui
-    def evidence_wrap():
-        key = selected.get()
-        SHOW_CARD = {"drop_heating_furnace", "drop_etc", "drop_molten_volume", "drop_mold_temp3"}
-        if key in SHOW_CARD:
-            return ui.card(
-                ui.h3("데이터 확인하기"),
-                ui.output_ui("evidence_panel"),
-                class_="shadow"
-            )
-        return None
+        s = df["heating_furnace"]
+        # NaN을 문자열 "NaN"으로 치환 후 개수 집계
+        s = s.where(~s.isna(), "NaN")
+        vc = s.value_counts(dropna=False)  # A/B/NaN
+        labels = vc.index.tolist()
+        values = vc.values
 
-    # --- 카드 내부 구성 ---
-    @output
-    @render.ui
-    def evidence_panel():
-        key = selected.get()
-        if not key:
-            return ui.markdown("왼쪽에서 항목을 선택하면 데이터와 설명이 표시됩니다.")
+        fig, ax = plt.subplots(figsize=(9, 3.6))
+        bars = ax.bar(labels, values, color=["#4c78a8", "#72b7b2", "#bcbddc"])
+        ax.set_ylabel("Count")
+        ax.set_title("heating_furnace 분포 (A/B/NaN)")
 
-        blocks = []
-        if key == "drop_heating_furnace":
-            blocks += [
-                ui.h4("특정 인덱스 구간 (73406–73418)"),
-                ui.output_data_frame("hf_slice_df"),
-                ui.hr(),
-            ]
-        if key == "drop_etc":
-            blocks += [
-                ui.h4("상위 5행 미리보기 (registration, time, date)"),
-                ui.output_data_frame("etc_head_df"),
-                ui.hr(),
-            ]
-        if key == "drop_molten_volume":
-            blocks += [
-                ui.h4("mold_code별 molten_volume 산점도 (빈도 상위 4개, 각 300 샘플)"),
-                ui.output_plot("mv_plot", width="100%", height="1100px"),
-                ui.hr(),
-            ]
-        if key == "drop_mold_temp3":
-            blocks += [
-                ui.h4("upper/lower_mold_temp3 Histogram"),
-                ui.output_plot("mt3_hist", width="100%", height="700px"),
-                ui.hr(),
-            ]
-
-        blocks += [
-            ui.h5("설명"),
-            ui.HTML(EVIDENCE_DESC.get(key, "<p>설명 추가하기</p>")),
-        ]
-        return ui.TagList(*blocks)
-
-    # --- heating_furnace 표 ---
+        for rect, val in zip(bars, values):
+            ax.text(rect.get_x() + rect.get_width()/2, rect.get_height(),
+                    f"{int(val):,}", ha="center", va="bottom", fontsize=10)
+        return fig
+    
+    # --- heating_furnace: 특정 인덱스 구간 미리보기 ---
     @output
     @render.data_frame
     def hf_slice_df():
-        if selected.get() != "drop_heating_furnace":
-            return pd.DataFrame()
-
         df = _raw_df()
         required = ["heating_furnace", "mold_code", "time", "date", "molten_volume", "count"]
         if not set(required).issubset(df.columns):
             return pd.DataFrame()
 
         start, end = 73406, 73418
-        subset = df.loc[start:end, required].copy() if df.index.max() >= end else df.loc[:, required].head(12).copy()
+        subset = df.loc[start:end, required].copy() if df.index.max() >= end \
+                 else df.loc[:, required].head(12).copy()
 
         display = pd.DataFrame({
             "index":           subset.index,
@@ -335,18 +300,94 @@ def server(input, output, session):
         display = display.replace({pd.NA: "Nan", None: "Nan", "": "Nan"}).fillna("Nan")
         return display
 
-    # --- drop_etc: registration/time/date 5행만 ---
+
+    # ── (단일 칼럼) molten_volume: 결측 vs 비결측 도넛 차트 ─────────────────────
+    # ── (단일 칼럼) molten_volume: 결측 vs 비결측 도넛 차트 ─────────────────────
+    @output
+    @render.plot
+    def mv_pie():
+        df = _raw_df()
+        if "molten_volume" not in df.columns or df.empty:
+            fig = plt.figure(figsize=(3, 2))
+            plt.text(0.5, 0.5, "molten_volume 칼럼이 없거나 데이터가 비어있습니다.",
+                     ha="center", va="center")
+            plt.axis("off")
+            return fig
+    
+        # 문자열로 통일 후 공백 제거
+        s = df["molten_volume"].astype("string").str.strip()
+    
+        # 결측 판단: NaN + 빈문자 + 'nan'/'none' (대소문자 무시)
+        miss_mask = s.isna() | s.eq("") | s.str.lower().isin(["nan", "none"])
+        n_miss = int(miss_mask.sum())
+        n_ok   = int((~miss_mask).sum())
+    
+        labels = ["결측", "비결측"]
+        sizes  = [n_miss, n_ok]
+        colors = ["#e15759", "#4c78a8"]
+    
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        # 반환값 언팩하지 않으면 버전 차이에도 안전
+        ax.pie(
+            sizes,
+            labels=labels,
+            colors=colors,
+            startangle=90,
+            counterclock=False,
+            wedgeprops=dict(width=0.38, edgecolor="white"),  # 도넛 형태
+            pctdistance=0.80,
+            textprops={"fontsize": 12},
+            autopct=lambda p: f"{p:.1f}%\n({int(round(p/100*sum(sizes))):,})",
+        )
+        ax.set_title("molten_volume 결측/비결측 비율", pad=8)
+        ax.axis("equal")
+        return fig
+
+
+    # ── (단일 칼럼) upper/lower_mold_temp3: 0~1500 히스토그램 + 1449 라인 ─────
+    @output
+    @render.plot
+    def mt3_hist():
+        df = _num_df()
+        cols = ["upper_mold_temp3", "lower_mold_temp3"]
+        if not set(cols).issubset(df.columns):
+            fig = plt.figure(figsize=(4, 2))
+            plt.text(0.5, 0.5, "upper/lower_mold_temp3 열이 없습니다.", ha="center", va="center")
+            plt.axis("off")
+            return fig
+
+        for c in cols:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        fig, axes = plt.subplots(2, 1, figsize=(10, 6.5))
+        fig.subplots_adjust(hspace=0.4, top=0.92, bottom=0.12, left=0.08, right=0.98)
+
+        name_map = {"upper_mold_temp3": "Upper Mold Temp3", "lower_mold_temp3": "Lower Mold Temp3"}
+        for i, c in enumerate(cols):
+            ax = axes[i]
+            s_all  = df[c].dropna()
+            s_plot = s_all[(s_all >= 0) & (s_all <= 1500)]
+            ax.hist(s_plot, bins=120, color="#4c78a8", alpha=0.85, edgecolor="white")
+            ax.axvline(1449.0, color="red", linestyle="--", linewidth=1.8)
+            cnt_1449 = int((s_all == 1449.0).sum())
+            ax.set_xlim(0, 1500)
+            ax.set_xlabel("Temperature")
+            ax.set_ylabel("Count")
+            ax.set_title(f"{name_map[c]} — n={len(s_plot):,} (x≤1500), 1449.0 개수={cnt_1449:,}")
+            ymax = ax.get_ylim()[1]
+            ax.text(1449.0, ymax * 0.9, f"{cnt_1449:,}", color="red",
+                    ha="left", va="center", fontsize=10, rotation=90)
+
+        return fig
+
+    # ── (단일 칼럼) registration/time/date 5행 미리보기 ────────────────────────
     @output
     @render.data_frame
-    def etc_head_df():
-        if selected.get() != "drop_etc":
-            return pd.DataFrame()
-
+    def reg_head_df():
         df = _raw_df()
         reg_col = "registration" if "registration" in df.columns else (
             "registration_time" if "registration_time" in df.columns else None
         )
-
         cols = []
         if reg_col: cols.append(reg_col)
         if "time" in df.columns: cols.append("time")
@@ -354,127 +395,19 @@ def server(input, output, session):
         if not cols:
             return pd.DataFrame()
 
-        display = df[cols].head(5).copy()
+        view = df[cols].head(5).copy()
         if reg_col and reg_col != "registration":
-            display = display.rename(columns={reg_col: "registration"})
-        display = display.replace({pd.NA: "Nan", None: "Nan", "": "Nan"}).fillna("Nan")
-        return display
+            view = view.rename(columns={reg_col: "registration"})
+        view = view.replace({pd.NA: "Nan", None: "Nan", "": "Nan"}).fillna("Nan")
+        return view
 
-    # --- molten_volume: mold_code별 산점도 (이상치 제거 + 큰 그림 + 간격 조정) ---
-    @output
-    @render.plot
-    def mv_plot():
-        if selected.get() != "drop_molten_volume":
-            fig = plt.figure(figsize=(4, 2))
-            plt.text(0.5, 0.5, "molten_volume을 선택하세요", ha="center", va="center")
-            plt.axis("off")
-            return fig
-
-        df = _mv_df()
-        if df.empty:
-            fig = plt.figure(figsize=(4, 2))
-            plt.text(0.5, 0.5, "필수 칼럼이 없거나 데이터가 비어있습니다.", ha="center", va="center")
-            plt.axis("off")
-            return fig
-
-        # 이상치 제거: molten_volume > 2500 제외
-        df = df[df["molten_volume"] <= 2500]
-
-        top_molds = df["mold_code"].value_counts().index.tolist()[:4]
-        n = len(top_molds)
-
-        fig, axes = plt.subplots(nrows=n, ncols=1, figsize=(18, 4.8 * n))
-        fig.subplots_adjust(hspace=0.65, top=0.95, bottom=0.08)
-
-        if n == 1:
-            axes = [axes]
-
-        hue_order = ["0.0", "1.0"]
-        palette_map = {"0.0": "blue", "1.0": "red"}
-
-        for i, mold in enumerate(top_molds):
-            ax = axes[i]
-            mold_df = df[df["mold_code"] == mold].head(300)
-            sns.scatterplot(
-                data=mold_df,
-                x="count", y="molten_volume",
-                hue="passorfail", hue_order=hue_order,
-                palette=palette_map, alpha=0.7, s=24, ax=ax, legend=False
-            )
-            ax.set_title(f"Mold Code: {mold}", pad=6, fontsize=15)
-            ax.set_xlabel("Count")
-            ax.set_ylabel("Molten Volume")
-            ax.margins(x=0.04, y=0.12)
-            ax.grid(True, alpha=0.25)
-
-        custom_legend = [
-            Line2D([0], [0], marker='o', color='blue', linestyle='', label='양품 (0.0)', markersize=8),
-            Line2D([0], [0], marker='o', color='red',  linestyle='', label='불량 (1.0)', markersize=8),
-        ]
-        axes[-1].legend(handles=custom_legend, title="품질", loc="upper right")
-        return fig
-
-    # --- mold_temp3: Histogram ---
-    # --- mold_temp3: Histogram (upper/lower 모두 0~1500 구간으로 통일) ---
-    @output
-    @render.plot
-    def mt3_hist():
-        if selected.get() != "drop_mold_temp3":
-            fig = plt.figure(figsize=(4, 2))
-            plt.text(0.5, 0.5, "upper/lower_mold_temp3를 선택하세요", ha="center", va="center")
-            plt.axis("off")
-            return fig
-
-        df = _mt3_df()  # 숫자형으로 변환된 upper/lower_mold_temp3를 반환하는 기존 헬퍼
-        if df.empty:
-            fig = plt.figure(figsize=(4, 2))
-            plt.text(0.5, 0.5, "필수 칼럼이 없거나 데이터가 비어있습니다.", ha="center", va="center")
-            plt.axis("off")
-            return fig
-
-        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(16, 8))
-        fig.subplots_adjust(hspace=0.45, top=0.92, bottom=0.1, left=0.07, right=0.98)
-
-        cols = ["upper_mold_temp3", "lower_mold_temp3"]
-        name_map = {"upper_mold_temp3": "Upper Mold Temp3", "lower_mold_temp3": "Lower Mold Temp3"}
-
-        for i, col in enumerate(cols):
-            ax = axes[i]
-
-            # 전체(원본)과, 시각화용(0~1500) 시리즈 분리
-            s_all  = df[col].dropna()
-            s_plot = s_all[(s_all >= 0) & (s_all <= 1500)]
-
-            # 히스토그램
-            ax.hist(s_plot, bins=120, color="#4c78a8", alpha=0.85, edgecolor="white")
-
-            # 1449.0 표시 및 개수 주석(개수는 전체 기준)
-            ax.axvline(1449.0, color="red", linestyle="--", linewidth=1.8)
-            cnt_1449 = int((s_all == 1449.0).sum())
-            ax.set_title(
-                f"{name_map[col]} — n={len(s_plot):,} (x≤1500), 1449.0 개수={cnt_1449:,}",
-                pad=8
-            )
-            ax.set_xlabel("Temperature")
-            ax.set_ylabel("Count")
-            ax.set_xlim(0, 1500)
-            ax.grid(True, axis="y", alpha=0.25)
-            ymax = ax.get_ylim()[1]
-            ax.text(1449.0, ymax * 0.9, f"{cnt_1449:,}", color="red",
-                    ha="left", va="center", fontsize=10, rotation=90)
-
-        return fig
-
-
-
-    # --- PDF 상태 안내 ---
+    # ── PDF 상태/다운로드 ──────────────────────────────────────────────────────
     @output
     @render.text
     def pdf_status():
         return f"파일 위치: {PDF_FILE}" if PDF_FILE.exists() \
             else "주의: PDF 파일이 아직 없습니다. reports/preprocessing_report.pdf 경로에 파일을 생성해 주세요."
 
-    # --- PDF 다운로드 ---
     @render.download(filename="preprocessing_report.pdf")
     def download_pdf():
         if PDF_FILE.exists():

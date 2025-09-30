@@ -18,21 +18,16 @@ df.columns
 df.isna().sum()
 
 # 데이터 분할
-n = len(df)
-split_idx = int(n * 0.8)
-
-train_df = df.iloc[:split_idx].copy()
-test_df  = df.iloc[split_idx:].copy()
-
-train_df = train_df.reset_index(drop=True)
-test_df  = test_df.reset_index(drop=True)
+train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
 
 # ==================================================================================================
 # 범주형으로 처리할 컬럼
 # ==================================================================================================
 train_df["mold_code"] = train_df["mold_code"].astype('object')
+train_df["EMS_operation_time"] = train_df["EMS_operation_time"].astype('object')
 
 test_df["mold_code"] = test_df["mold_code"].astype('object')
+test_df["EMS_operation_time"] = test_df["EMS_operation_time"].astype('object')
 
 
 # ==================================================================================================
