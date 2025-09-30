@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_FILE = BASE_DIR / "data" / "raw" / "train.csv"
 SCALER_FILE = BASE_DIR / "data" / "interim" / "std_scaler_v1.joblib"
 MODEL_FILE = BASE_DIR / "data" / "interim" / "rf_model_v1.joblib"
-PDP_IMAGE_FILE = BASE_DIR / "data" / "shinypng" / "RF_basic_PDP.png"
+PDP_IMAGE_FILE = BASE_DIR / "data" / "png" / "RF_basic_PDP.png"
 
 # --- 데이터 로드 ---
 df = pd.read_csv(DATA_FILE, encoding="utf-8", low_memory=False)

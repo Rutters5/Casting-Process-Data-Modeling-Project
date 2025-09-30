@@ -172,10 +172,15 @@ plt.show()
 # (1) NaN이 2개 이상의 그룹으로 나뉨
 # (2) molten_volume을 한 번 채울 때마다 count가 새로 시작되는데, 그때마다 furnace를 바꾸지 않는다고 확신할 수 없음
 # ==================================================================================================
-train_df = pd.read_csv("../../data/raw/train.csv")
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[3]
+DATA_FILE_train = BASE_DIR / "data" / "processed" / "train_v1.csv"
+train_df = pd.read_csv(DATA_FILE_train)
+
 pd.set_option('display.max_rows', None)
-train_df.loc[~(train_df['heating_furnace'].isna())][['mold_code', 'heating_furnace']].tail(70)
-train_df.loc[73406:73450, ['heating_furnace', 'mold_code', 'time', 'date', 'molten_volume', 'count']]
+#train_df.loc[~(train_df['heating_furnace'].isna())][['mold_code', 'heating_furnace']].tail(70)
+#train_df.loc[73406:73450, ['heating_furnace', 'mold_code', 'time', 'date', 'molten_volume', 'count']]
 
 train_df.info()
 
