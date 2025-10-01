@@ -5,53 +5,49 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.lines import Line2D
+import warnings
+
+
+# 폰트 관련 경고 메시지 숨기기
+warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+warnings.filterwarnings('ignore', message='findfont')
 
 # Shiny 버전에 따라 ui.nav 또는 ui.nav_panel을 사용
 NAV = getattr(ui, "nav", ui.nav_panel)
 
 # --- 경로 설정 ---
 BASE_DIR = Path(__file__).resolve().parents[2]
+APP_DIR = Path(__file__).resolve().parents[1]
 PDF_FILE  = BASE_DIR / "reports" / "preprocessing_report.pdf"
 DATA_FILE = BASE_DIR / "data" / "raw" / "train.csv"
 
-# ===== Matplotlib 한글 폰트 =====
-plt.rcParams["font.family"] = [
-    "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR",
-    "NanumGothic", "DejaVu Sans", "Arial Unicode MS", "sans-serif"
-]
+# ===== Matplotlib 한글 폰트 (실제 존재하는 폰트만 사용) =====
+plt.rcParams["font.family"] = ["Malgun Gothic", "DejaVu Sans", "sans-serif"]
 plt.rcParams["axes.unicode_minus"] = False
-
 # --- 상세 컨텐츠(텍스트) ---
 DETAILS = {
     "drop_heating_furnace": (
-        "### 단일 칼럼 제거 — heating_furnace 열\n"
         "- 결측이 매우 많고 기본 모델에서 변수 중요도 낮음 → 학습에서 제거"
     ),
     "drop_molten_volume": (
-        "### 단일 칼럼 제거 — molten_volume 열\n"
         "- 결측이 매우 많고 기본 모델에서 변수 중요도 낮음 → 학습에서 제거"
     ),
     "drop_mold_temp3": (
-        "### 단일 칼럼 제거 — upper/lower_mold_temp3 열\n"
         "- 이상치 1449.0을 센서 오류 코드로 가정 → 두 칼럼 모두 제거"
     ),
     "drop_etc": (
-        "### 단일 칼럼 제거 — registration_time 열\n"
         "- registration_time: 'time'+'date' 결합 정보(중복 의미) → 제거"
     ),
     "impute_molten_temp": (
-        "### 결측치 처리 — molten_temp 열\n"
         "- molten_temp 결측이 연속되어 나오는 경우 거의 없음 → 앞뒤 행들과 이어지도록 두 행들의 평균으로 대치\n"
         "- train 데이터에서는 이전 행과 다음 행의 molten_temp 값들의 평균으로 대치\n"
         "- test 데이터에서는 바로 직전 행의 molten_temp 값으로 대치"
     ),
     "row_emergency_stop": (
-        "### 행 제거 — emergency_stop\n"
         "- emergency_stop이 결측인 경우 1번 존재, 이때 이 행의 나머지 칼럼들 대부분 결측 → 학습 데이터에서 행 제거\n"
         "- 모델 예측이 끝난 뒤, emergency_stop 값을 확인해서 결측인 경우 불량으로 나오도록 함"
     ),
     "row_count_dup": (
-        "### 행 제거 — count 중복\n"
         "- count, mold_code, time, molten_volume 등이 겹치는 경우 다른 모든 변수들도 같은 값을 가짐\n"
         "- 정보 중복을 피하기 위해 하나만 남기고 나머지 중복 행들 삭제"
     ),
@@ -102,64 +98,81 @@ EVIDENCE_DESC = {
 # =========================
 # UI
 # =========================
-def panel():
+def panel_body():
     css = ui.head_content(
-        ui.tags.style("""
-            .card .nav { margin-bottom: 0.75rem; }
-            .left-col { padding-right: 1rem; border-right: 1px solid #eee; }
-            .right-col { padding-left: 1rem; }
-            .muted { color: #6c757d; }
-            /* 상단 툴바 */
-            .topbar{
-                display:flex; justify-content:space-between; align-items:center;
-                gap:.75rem; margin-bottom:.75rem;
-            }
-            .topbar .right{ display:flex; align-items:center; gap:.5rem; }
-            
-            /* PDF 버튼 호버 효과 */
-            .topbar button:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4) !important;
-            }
-            .topbar button:active {
-                transform: translateY(0px);
-            }
-            
-            /* 접기 박스 */
-            details.details-box { margin-top: .75rem; }
-            details.details-box > summary { cursor: pointer; font-weight: 600; }
-            
-            /* 아코디언 스타일 */
-            .accordion-section { 
-                background: white; 
-                border-radius: 16px; 
-                margin-bottom: 20px; 
-                box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
-                overflow: hidden;
-            }
-            .accordion-header { 
-                background: #2A2D30; 
-                color: white; 
-                padding: 20px 28px; 
-                cursor: pointer; 
-                display: flex; 
-                justify-content: space-between; 
-                border: none; 
-                width: 100%; 
-                text-align: left; 
-                font-size: 16px; 
-                font-weight: 600; 
-                border-radius: 16px 16px 0 0;
-            }
-            .accordion-header:hover { 
-                background-color: #1f2428;
-            }
-            .accordion-content { 
-                padding: 24px 28px; 
-                background: #ffffff; 
-                border-radius: 0 0 16px 16px;
-            }
-        """),
+    ui.tags.style("""
+        .card .nav { margin-bottom: 0.75rem; }
+        .left-col { padding-right: 1rem; border-right: 1px solid #eee; }
+        .right-col { padding-left: 1rem; }
+        .muted { color: #6c757d; }
+         /* 탭 메뉴 색상 변경 */
+        .nav-tabs .nav-link {
+            background-color: #2A2D30;
+            color: white;
+            border: none;
+            margin-right: 4px;
+        }
+        .nav-tabs .nav-link:hover {
+            background-color: #686f7d;
+        }
+        .nav-tabs .nav-link.active {
+            background-color: #6c6a6a;
+            color: white;
+        }
+        /* 상단 툴바 */
+        .topbar{
+            display:flex; justify-content:space-between; align-items:center;
+            gap:.75rem; margin-bottom:.75rem;
+        }
+        .topbar .right{ display:flex; align-items:center; gap:.5rem; }
+        
+        /* PDF 버튼 호버 효과 */
+        .topbar button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4) !important;
+        }
+        .topbar button:active {
+            transform: translateY(0px);
+        }
+        
+        /* 접기 박스 */
+        details.details-box { margin-top: .75rem; }
+        details.details-box > summary { cursor: pointer; font-weight: 600; }
+        
+        /* 아코디언 스타일 */
+        .accordion-section { 
+            background: white; 
+            border-radius: 16px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
+            overflow: hidden;
+            max-width: 1400px;
+            margin-left: ;
+            margin-right: 1000;
+        }
+        .accordion-header { 
+            background: #2A2D30; 
+            color: white; 
+            padding: 20px 28px; 
+            cursor: pointer; 
+            display: flex; 
+            justify-content: space-between; 
+            border: none; 
+            width: 100%; 
+            text-align: left; 
+            font-size: 16px; 
+            font-weight: 600; 
+            border-radius: 16px 16px 0 0;
+        }
+        .accordion-header:hover { 
+            background-color: #1f2428;
+        }
+        .accordion-content { 
+            padding: 24px 28px; 
+            background: #ffffff; 
+            border-radius: 0 0 16px 16px;
+        }
+    """),
         ui.tags.script("""
             function toggleAccordion(id) {
                 var content = document.getElementById(id);
@@ -179,200 +192,216 @@ def panel():
             ui.column(6, right, class_="right-col"),
         )
 
-    return ui.nav_panel(
+    return ui.TagList(
         "데이터 전처리 요약",
         css,
 
         # 상단 검색창 스타일 제목 + PDF 버튼
         ui.div(
-            ui.div(
-                ui.HTML('<i class="fa-solid fa-magnifying-glass" style="color: #9ca3af; margin-right: 14px; font-size: 18px;"></i>'),
-                ui.span("데이터 전처리 요약", style="color: #6b7280; font-size: 16px; font-weight: 400;"),
+        ui.div(
+            ui.HTML('<i class="fa-solid fa-magnifying-glass" style="color: #9ca3af; margin-right: 14px; font-size: 16px;"></i>'),
+            ui.span("데이터 전처리 요약", style="color: #6b7280; font-size: 15px; font-weight: 400;"),
+            style="""
+                background: white;
+                border: 1px solid #d1d5db;
+                border-radius: 24px;
+                padding: 14px 20px;
+                display: flex;
+                align-items: center;
+                flex: 1;
+                max-width: 400px;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+                margin-left: 20px;
+                margin-top: 20px;
+            """
+        ),
+        ui.div(
+            ui.download_button(
+                "download_pdf", 
+                ui.HTML('<i class="fa-solid fa-file-pdf"></i> PDF 다운로드'),
                 style="""
-                    background: white;
-                    border: 1px solid #e5e7eb;
-                    border-radius: 8px;
-                    padding: 10px 18px;
-                    display: flex;
+                    background: linear-gradient(135deg, #ec685f 0%, #eb6056 100%);
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    font-size: 15px;
+                    font-weight: 600;
+                    border-radius: 20px;    
+                    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.2);
+                    transition: all 0.3s ease;
+                    cursor: pointer;
+                    margin-right: 40px;
+                    display: inline-flex;
                     align-items: center;
-                    flex: 1;
-                    max-width: 500px;
+                    height: 41px;
                 """
             ),
-            ui.div(
-                ui.download_button(
-                    "download_pdf", 
-                    ui.HTML('<i class="fa-solid fa-file-pdf"></i> PDF 다운로드'),
-                    style="""
-                        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-                        color: white;
-                        border: none;
-                        padding: 12px 24px;
-                        font-size: 15px;
-                        font-weight: 600;
-                        border-radius: 20px;
-                        box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
-                        transition: all 0.3s ease;
-                        cursor: pointer;
-                        margin-right: 8px;
-                        margin-top: 4px;
-                    """
-                ),
-                class_="right"
-            ),
-            class_="topbar",
-            style="margin-bottom: 1.5rem; padding: 8px 0; display: flex; justify-content: space-between; align-items: center;"
+            style="margin-top: 20px;"
         ),
+        class_="topbar",
+        style="margin-bottom: 1rem; padding: 8px 0; display: flex; justify-content: space-between; align-items: center;"
+    ),
 
-        # ───────────────────────────────────────────────
-        # 1) 단일 칼럼 제거
-        # ───────────────────────────────────────────────
+        # 전체 컨텐츠를 감싸는 컨테이너 추가
         ui.div(
-            ui.tags.button(
-                ui.div(
-                    ui.span("단일 칼럼 제거", style="font-size: 16px;"),
-                    ui.span("▼", style="font-size: 12px;"),
-                    style="display: flex; justify-content: space-between; width: 100%;"
-                ),
-                onclick="toggleAccordion('drop_columns_content')",
-                class_="accordion-header"
-            ),
+            # ───────────────────────────────────────────────
+            # 1) 단일 칼럼 제거
+            # ───────────────────────────────────────────────
             ui.div(
-                ui.navset_tab(
-                    NAV(
-                        "heating_furnace 열",
-                        two_col(
-                            ui.div(
-                                ui.markdown(DETAILS["drop_heating_furnace"]),
-                                ui.output_plot("hf_hist", width="100%", height="360px"),
-                                style="display:flex; flex-direction:column; gap:.5rem;"
-                            ),
-                            ui.div(
-                                ui.h5("특정 인덱스 구간 확인하기 (73406–73413)"),
-                                ui.output_ui("hf_slice_df"),
-                                ui.HTML(EVIDENCE_DESC["drop_heating_furnace"]),
-                                style="margin:.25rem 0 0 0;"
-                            ),
-                        ),
+                ui.tags.button(
+                    ui.div(
+                        ui.span("단일 칼럼 제거", style="font-size: 16px;"),
+                        ui.span("▼", style="font-size: 12px;"),
+                        style="display: flex; justify-content: space-between; width: 100%;"
                     ),
-                    NAV(
-                        "molten_volume 열",
-                        two_col(
-                            ui.div(
-                                ui.markdown(DETAILS["drop_molten_volume"]),
-                                ui.output_plot("mv_pie", width="100%", height="360px"),
-                                style="display:flex; flex-direction:column; gap:.5rem;"
-                            ),
-                            ui.div(
-                                ui.h5("mold_code별 count - molten_volume 산점도"),
-                                ui.output_plot("mv_scatter_plot", width="100%", height="600px"),
-                                ui.HTML(EVIDENCE_DESC["drop_molten_volume"]),
-                                style="margin:.25rem 0 0 0;"
-                            ),
-                        ),
-                    ),
-                    NAV(
-                        "upper/lower_mold_temp3 · registration_time열",
-                        two_col(
-                            ui.div(
-                                ui.markdown(DETAILS["drop_mold_temp3"]),
-                                ui.output_plot("mt3_hist", width="100%", height="420px"),
-                                style="display:flex; flex-direction:column; gap:.5rem;"
-                            ),
-                            ui.div(
-                                ui.markdown(DETAILS["drop_etc"]),
-                                ui.output_data_frame("reg_head_df"),
-                                style="display:flex; flex-direction:column; gap:.5rem;"
-                            ),
-                        ),
-                    ),
+                    onclick="toggleAccordion('drop_columns_content')",
+                    class_="accordion-header"
                 ),
-                id="drop_columns_content",
-                class_="accordion-content",
-                style="display: block;"
-            ),
-            class_="accordion-section"
-        ),
-    
-        # ───────────────────────────────────────────────
-        # 2) 행 제거
-        # ───────────────────────────────────────────────
-        ui.div(
-            ui.tags.button(
                 ui.div(
-                    ui.span("행 제거", style="font-size: 16px;"),
-                    ui.span("▼", style="font-size: 12px;"),
-                    style="display: flex; justify-content: space-between; width: 100%;"
-                ),
-                onclick="toggleAccordion('row_removal_content')",
-                class_="accordion-header"
-            ),
-            ui.div(
-                ui.navset_tab(
-                    NAV(
-                        "emergency_stop",
-                        ui.div(
-                            ui.markdown(DETAILS["row_emergency_stop"]),
-                            ui.output_data_frame("emergency_stop_df"),
-                            style="display:flex; flex-direction:column; gap:.5rem;"
-                        ),
-                    ),
-                    NAV(
-                        "count 중복",
-                        ui.div(
-                            ui.markdown(DETAILS["row_count_dup"]),
-                            ui.output_ui("count_dup_ui"),
-                            style="display:flex; flex-direction:column; gap:.5rem;"
-                        ),
-                    ),
-                ),
-                id="row_removal_content",
-                class_="accordion-content",
-                style="display: block;"
-            ),
-            class_="accordion-section"
-        ),
-
-        # ───────────────────────────────────────────────
-        # 3) 결측치 처리
-        # ───────────────────────────────────────────────
-        ui.div(
-            ui.tags.button(
-                ui.div(
-                    ui.span("결측치 처리", style="font-size: 16px;"),
-                    ui.span("▼", style="font-size: 12px;"),
-                    style="display: flex; justify-content: space-between; width: 100%;"
-                ),
-                onclick="toggleAccordion('missing_value_content')",
-                class_="accordion-header"
-            ),
-            ui.div(
-                ui.navset_tab(
-                    NAV(
-                        "molten_temp 열",
-                        ui.div(
-                            ui.markdown(DETAILS["impute_molten_temp"]),
-                            ui.row(
-                                ui.column(
-                                    6,
-                                    ui.output_plot("mt_na_runs_plot", width="100%", height="380px"),
-                                    class_="pe-2"
+                    ui.navset_tab(
+                        NAV(
+                            "heating_furnace 열",
+                            two_col(
+                                ui.div(
+                                     ui.img(src="heating_furnace.png", style="width: 100%; height: auto;"),
+                                    ui.div(
+                                        ui.HTML('<i class="fa-solid fa-circle-xmark" style="color: #dc3545; margin-right: 8px;"></i>'),
+                                        ui.span("제거 이유: ", style="font-weight: 700; color: #dc3545; font-size: 15px;"),
+                                        ui.span(DETAILS["drop_heating_furnace"], style="color: #495057; font-size: 14px;"),
+                                        style="background: #fff5f5; border-left: 4px solid #dc3545; padding: 12px 16px; border-radius: 6px; margin-top: 12px; display: flex; align-items: flex-start;"
+                                    ),
+                                    style="display:flex; flex-direction:column; gap:.5rem;"
                                 ),
-                                ui.column(
-                                    6,
-                                    ui.output_plot("mt_na_sample_plot", width="100%", height="580px"),
-                                    class_="ps-2"
-                                )
+                                ui.div(
+                                    ui.h5("특정 인덱스 구간 확인하기 (73406–73413)"),
+                                    ui.output_ui("hf_slice_df"),
+                                    ui.HTML(EVIDENCE_DESC["drop_heating_furnace"]),
+                                    style="margin:.25rem 0 0 0;"
+                                ),
                             ),
-                            style="display:flex; flex-direction:column; gap:.75rem;"
+                        ),
+                        NAV(
+                            "molten_volume 열",
+                            two_col(
+                                ui.div(
+                                    ui.markdown(DETAILS["drop_molten_volume"]),
+                                    ui.output_plot("mv_pie", width="100%", height="360px"),
+                                    style="display:flex; flex-direction:column; gap:.5rem;"
+                                ),
+                                ui.div(
+                                    ui.h5("mold_code별 count - molten_volume 산점도"),
+                                    ui.output_plot("mv_scatter_plot", width="100%", height="600px"),
+                                    ui.HTML(EVIDENCE_DESC["drop_molten_volume"]),
+                                    style="margin:.25rem 0 0 0;"
+                                ),
+                            ),
+                        ),
+                        NAV(
+                            "upper/lower_mold_temp3 · registration_time열",
+                            two_col(
+                                ui.div(
+                                    ui.markdown(DETAILS["drop_mold_temp3"]),
+                                    ui.output_plot("mt3_hist", width="100%", height="420px"),
+                                    style="display:flex; flex-direction:column; gap:.5rem;"
+                                ),
+                                ui.div(
+                                    ui.markdown(DETAILS["drop_etc"]),
+                                    ui.output_data_frame("reg_head_df"),
+                                    style="display:flex; flex-direction:column; gap:.5rem;"
+                                ),
+                            ),
                         ),
                     ),
+                    id="drop_columns_content",
+                    class_="accordion-content",
+                    style="display: none;"
                 ),
-                id="missing_value_content",
-                class_="accordion-content",
-                style="display: block;"
+                class_="accordion-section"
             ),
-            class_="accordion-section"
+        
+            # ───────────────────────────────────────────────
+            # 2) 행 제거
+            # ───────────────────────────────────────────────
+            ui.div(
+                ui.tags.button(
+                    ui.div(
+                        ui.span("행 제거", style="font-size: 16px;"),
+                        ui.span("▼", style="font-size: 12px;"),
+                        style="display: flex; justify-content: space-between; width: 100%;"
+                    ),
+                    onclick="toggleAccordion('row_removal_content')",
+                    class_="accordion-header"
+                ),
+                ui.div(
+                    ui.navset_tab(
+                        NAV(
+                            "emergency_stop",
+                            ui.div(
+                                ui.markdown(DETAILS["row_emergency_stop"]),
+                                ui.output_data_frame("emergency_stop_df"),
+                                style="display:flex; flex-direction:column; gap:.5rem;"
+                            ),
+                        ),
+                        NAV(
+                            "count 중복",
+                            ui.div(
+                                ui.markdown(DETAILS["row_count_dup"]),
+                                ui.output_ui("count_dup_ui"),
+                                style="display:flex; flex-direction:column; gap:.5rem;"
+                            ),
+                        ),
+                    ),
+                    id="row_removal_content",
+                    class_="accordion-content",
+                    style="display: none;"
+                ),
+                class_="accordion-section"
+            ),
+
+            # ───────────────────────────────────────────────
+            # 3) 결측치 처리
+            # ───────────────────────────────────────────────
+            ui.div(
+                ui.tags.button(
+                    ui.div(
+                        ui.span("결측치 처리", style="font-size: 16px;"),
+                        ui.span("▼", style="font-size: 12px;"),
+                        style="display: flex; justify-content: space-between; width: 100%;"
+                    ),
+                    onclick="toggleAccordion('missing_value_content')",
+                    class_="accordion-header"
+                ),
+                ui.div(
+                    ui.navset_tab(
+                        NAV(
+                            "molten_temp 열",
+                            ui.div(
+                                ui.markdown(DETAILS["impute_molten_temp"]),
+                                ui.row(
+                                    ui.column(
+                                        6,
+                                        ui.output_plot("mt_na_runs_plot", width="100%", height="380px"),
+                                        class_="pe-2"
+                                    ),
+                                    ui.column(
+                                        6,
+                                        ui.output_plot("mt_na_sample_plot", width="100%", height="580px"),
+                                        class_="ps-2"
+                                    )
+                                ),
+                                style="display:flex; flex-direction:column; gap:.75rem;"
+                            ),
+                        ),
+                    ),
+                    id="missing_value_content",
+                    class_="accordion-content",
+                    style="display: block;"
+                ),
+                class_="accordion-section"
+            ),
+            
+            # 컨테이너 닫기 + 너비 제한 스타일
+            style="max-width: 1400px; margin: 0 auto; padding: 0 24px;"
         ),
     )
 
@@ -390,6 +419,10 @@ def panel():
 # =========================
 # SERVER
 # =========================
+
+def panel():
+    return ui.nav_panel("데이터 전처리 요약", panel_body())
+
 def server(input, output, session):
 
     # ── DataFrames ────────────────────────────────────────────────────────────
@@ -420,33 +453,6 @@ def server(input, output, session):
         return df.dropna(subset=["molten_volume", "count", "mold_code"])
 
 
-    # ── (단일 칼럼) heating_furnace: A/B/NaN 개수 바 차트 ─────────────────────
-    @output
-    @render.plot
-    def hf_hist():
-        df = _raw_df()
-        if "heating_furnace" not in df.columns:
-            fig = plt.figure(figsize=(4, 2))
-            plt.text(0.5, 0.5, "heating_furnace 열이 없습니다.", ha="center", va="center")
-            plt.axis("off")
-            return fig
-
-        s = df["heating_furnace"]
-        # NaN을 문자열 "NaN"으로 치환 후 개수 집계
-        s = s.where(~s.isna(), "NaN")
-        vc = s.value_counts(dropna=False)  # A/B/NaN
-        labels = vc.index.tolist()
-        values = vc.values
-
-        fig, ax = plt.subplots(figsize=(9, 3.6))
-        bars = ax.bar(labels, values, color=["#4c78a8", "#72b7b2", "#bcbddc"])
-        ax.set_ylabel("Count")
-        ax.set_title("heating_furnace 분포 (A/B/NaN)")
-
-        for rect, val in zip(bars, values):
-            ax.text(rect.get_x() + rect.get_width()/2, rect.get_height(),
-                    f"{int(val):,}", ha="center", va="bottom", fontsize=10)
-        return fig
     
     # --- heating_furnace: 특정 인덱스 구간(73406–73413) + 그룹 색상 표시 ---
     @output
@@ -984,3 +990,4 @@ def server(input, output, session):
                 b"trailer<< /Size 7 /Root 2 0 R >>\nstartxref\n408\n%%EOF\n"
             )
             yield minimal_pdf
+
