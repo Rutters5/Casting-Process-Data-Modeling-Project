@@ -1,7 +1,7 @@
 # app.py
 from shiny import App, ui
 from modules import (
-    tab_analysis_copy,
+    tab_analysis_copy_copy as tab_analysis_copy,
     tab_model_performance,
     tab_process_explanation,
     tab_preprocessing,
@@ -141,3 +141,8 @@ def server(input, output, session):
 
 # 앱 실행 객체
 app = App(app_ui, server)
+
+
+
+
+
