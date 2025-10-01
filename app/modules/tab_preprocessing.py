@@ -17,6 +17,7 @@ NAV = getattr(ui, "nav", ui.nav_panel)
 
 # --- 경로 설정 ---
 BASE_DIR = Path(__file__).resolve().parents[2]
+APP_DIR = Path(__file__).resolve().parents[1]
 PDF_FILE  = BASE_DIR / "reports" / "preprocessing_report.pdf"
 DATA_FILE = BASE_DIR / "data" / "raw" / "train.csv"
 
@@ -262,7 +263,7 @@ def panel():
                             "heating_furnace 열",
                             two_col(
                                 ui.div(
-                                    ui.img(src="/heating_furnace.png", style="width: 100%; height: auto;"),
+                                     ui.img(src="heating_furnace.png", style="width: 100%; height: auto;"),
                                     ui.div(
                                         ui.HTML('<i class="fa-solid fa-circle-xmark" style="color: #dc3545; margin-right: 8px;"></i>'),
                                         ui.span("제거 이유: ", style="font-weight: 700; color: #dc3545; font-size: 15px;"),
