@@ -5,6 +5,9 @@ from shiny import ui, reactive, render
 import plotly.express as px
 import plotly.io as pio
 import pandas as pd
+import numpy as np
+import joblib
+import base64
 
 APP_DIR = Path(__file__).resolve().parents[1]
 SCORE_V0_PATH = APP_DIR / "data" / "models" / "v0"
@@ -46,6 +49,54 @@ MODELS_DIR = APP_DIR / "data" / "models"
 MODEL_METRICS: dict[str, dict[str, dict[str, float]]] = {model: {} for model in MODELS}
 METRIC_VALUES: dict[str, dict[str, dict[str, float]]] = {}
 HIGHLIGHT_MAP: dict[str, tuple[str, str] | None] = {}
+MODEL_ARTIFACT_CACHE: dict[tuple[str, str], dict | None] = {}
+FEATURE_IMPORTANCE_CACHE: dict[tuple[str, str], pd.DataFrame] = {}
+BEST_PARAMS_CACHE: dict[tuple[str, str], dict[str, object]] = {}
+PDP_IMAGE_CACHE: dict[tuple[str, str], str | None] = {}
+PDP_IMAGE_DIR = APP_DIR / "data" / "png"
+
+
+def _normalize_artifact_model(artifact: dict | None) -> dict | None:
+    if not isinstance(artifact, dict):
+        return artifact
+
+    if artifact.get("model") is None:
+        model_aliases = [
+            "model",
+            "model_clf",
+            "model_reg",
+            "estimator",
+            "classifier",
+            "regressor",
+            "clf",
+        ]
+        for alias in model_aliases:
+            if alias in artifact and artifact[alias] is not None:
+                artifact["model"] = artifact[alias]
+                break
+
+    return artifact
+
+
+def _resolve_metric_selection(metric_name: str) -> tuple[str, str] | None:
+    highlight = HIGHLIGHT_MAP.get(metric_name)
+    if highlight:
+        return highlight
+
+    # Fallback: first available model/version combination with data
+    for version in VERSIONS:
+        for model in MODELS:
+            if MODEL_METRICS.get(model, {}).get(version):
+                highlight = (model, version)
+                HIGHLIGHT_MAP[metric_name] = highlight
+                return highlight
+    # Absolute fallback: first declared pair
+    if MODELS and VERSIONS:
+        highlight = (MODELS[0], VERSIONS[0])
+        HIGHLIGHT_MAP[metric_name] = highlight
+        return highlight
+
+    return None
 
 
 def _load_model_metrics() -> None:
@@ -53,10 +104,13 @@ def _load_model_metrics() -> None:
 
     global MODEL_METRICS, METRIC_VALUES, HIGHLIGHT_MAP
 
-    # Reset containers
     MODEL_METRICS = {model: {} for model in MODELS}
     METRIC_VALUES = {metric: {model: {} for model in MODELS} for metric in DISPLAY_METRIC_MAP.keys()}
     HIGHLIGHT_MAP = {}
+    _reset_importance_cache()
+    BEST_PARAMS_CACHE.clear()
+    PDP_IMAGE_CACHE.clear()
+    MODEL_ARTIFACT_CACHE.clear()
 
     for version in VERSIONS:
         version_dir = MODELS_DIR / version
@@ -104,6 +158,215 @@ def _load_model_metrics() -> None:
             HIGHLIGHT_MAP[display_label] = None
 
 
+def _load_model_artifact(model_name: str, version: str) -> dict | None:
+    key = (model_name, version)
+    if key in MODEL_ARTIFACT_CACHE:
+        cached = MODEL_ARTIFACT_CACHE[key]
+        return _normalize_artifact_model(cached)
+
+    artifact_path = MODELS_DIR / version / f"{model_name}_{version}.pkl"
+    if not artifact_path.exists():
+        MODEL_ARTIFACT_CACHE[key] = None
+        return None
+
+    try:
+        artifact = joblib.load(artifact_path)
+    except Exception:
+        artifact = None
+
+    if artifact is None:
+        MODEL_ARTIFACT_CACHE[key] = None
+        return None
+
+    if not isinstance(artifact, dict):
+        artifact = {"model": artifact}
+
+    normalized = _normalize_artifact_model(artifact)
+    MODEL_ARTIFACT_CACHE[key] = normalized
+    return normalized
+
+
+def _get_feature_names(artifact: dict | None) -> list[str]:
+    if not artifact:
+        return []
+
+    feature_names: list[str] = []
+
+    scaler = artifact.get("scaler") if isinstance(artifact, dict) else None
+    if scaler is not None and hasattr(scaler, "feature_names_in_"):
+        feature_names.extend(list(scaler.feature_names_in_))
+
+    ohe = artifact.get("onehot_encoder") if isinstance(artifact, dict) else None
+    if ohe is not None:
+        if hasattr(ohe, "get_feature_names_out"):
+            try:
+                feature_names.extend(list(ohe.get_feature_names_out()))
+            except Exception:
+                pass
+        if not feature_names:
+            input_features = getattr(ohe, "feature_names_in_", None)
+            categories = getattr(ohe, "categories_", None)
+            if input_features is not None and categories is not None:
+                for base_name, cats in zip(input_features, categories):
+                    for cat in cats:
+                        feature_names.append(f"{base_name}={cat}")
+
+    if not feature_names:
+        model = artifact.get("model") if isinstance(artifact, dict) else None
+        if hasattr(model, "feature_name"):
+            try:
+                feature_names = list(model.feature_name())
+            except Exception:
+                feature_names = []
+
+    return feature_names
+
+
+def _compute_importances(model, feature_names: list[str]) -> pd.DataFrame:
+    if model is None:
+        return pd.DataFrame()
+
+    importances: np.ndarray | None = None
+
+    if hasattr(model, "feature_importance"):
+        try:
+            importances = np.array(model.feature_importance(importance_type="gain"))
+        except TypeError:
+            importances = np.array(model.feature_importance())
+    elif hasattr(model, "feature_importances_"):
+        importances = np.array(model.feature_importances_)
+    elif hasattr(model, "coef_"):
+        coefs = model.coef_
+        if isinstance(coefs, np.ndarray):
+            importances = np.mean(np.abs(coefs), axis=0).ravel()
+
+    if importances is None or importances.size == 0:
+        return pd.DataFrame()
+
+    if not feature_names or len(feature_names) != importances.size:
+        feature_names = [f"feature_{i}" for i in range(importances.size)]
+
+    df = pd.DataFrame({
+        "feature": feature_names,
+        "importance": importances,
+    })
+
+    df = df.sort_values("importance", ascending=False, ignore_index=True)
+
+    total = df["importance"].sum()
+    if total > 0:
+        df["normalized"] = df["importance"] / total
+    else:
+        df["normalized"] = df["importance"]
+
+    return df
+
+
+def _get_feature_importance(model_name: str, version: str) -> pd.DataFrame:
+    cache_key = (model_name, version)
+    if cache_key in FEATURE_IMPORTANCE_CACHE:
+        return FEATURE_IMPORTANCE_CACHE[cache_key]
+
+    artifact = _load_model_artifact(model_name, version)
+    model = None
+    if isinstance(artifact, dict):
+        model = artifact.get("model")
+    elif artifact is not None:
+        model = artifact
+
+    feature_names = _get_feature_names(artifact)
+    df = _compute_importances(model, feature_names)
+
+    FEATURE_IMPORTANCE_CACHE[cache_key] = df
+    return df
+
+
+def _reset_importance_cache() -> None:
+    FEATURE_IMPORTANCE_CACHE.clear()
+
+
+def _get_best_params(model_name: str, version: str) -> dict[str, object]:
+    cache_key = (model_name, version)
+    if cache_key in BEST_PARAMS_CACHE:
+        return BEST_PARAMS_CACHE[cache_key]
+
+    artifact = _load_model_artifact(model_name, version)
+    params: dict[str, object] | None = None
+
+    if isinstance(artifact, dict):
+        params = artifact.get("best_params")
+        # Some artifacts may store numeric types such as numpy scalars
+        if params is not None:
+            params = {
+                key: value.item() if isinstance(value, np.generic) else value
+                for key, value in params.items()
+            }
+
+    if params is None:
+        model = artifact.get("model") if isinstance(artifact, dict) else artifact
+        if model is not None and hasattr(model, "get_params"):
+            try:
+                params = model.get_params()
+            except Exception:
+                params = None
+
+    if params is None:
+        params = {}
+
+    BEST_PARAMS_CACHE[cache_key] = params
+    return params
+
+
+def _load_pdp_image(model_name: str, version: str) -> str | None:
+    cache_key = (model_name, version)
+    if cache_key in PDP_IMAGE_CACHE:
+        return PDP_IMAGE_CACHE[cache_key]
+
+    candidates = [
+        f"{model_name}_{version}_PDP.png",
+        f"{model_name}_{version}.png",
+        f"{model_name}_PDP.png",
+        f"{model_name}.png",
+    ]
+
+    fallback_names = {
+        "RandomForest": "RF_basic_PDP.png",
+    }
+
+    fallback = fallback_names.get(model_name)
+    if fallback:
+        candidates.append(fallback)
+
+    candidates.append("RF_basic_PDP.png")
+
+    search_dirs = []
+    version_dir = PDP_IMAGE_DIR / version if version else None
+    if version_dir and version_dir.exists():
+        search_dirs.append(version_dir)
+    search_dirs.append(PDP_IMAGE_DIR)
+
+    image_data_uri: str | None = None
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+
+        for directory in search_dirs:
+            image_path = directory / candidate
+            if not image_path.exists():
+                continue
+
+            try:
+                encoded = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+                image_data_uri = f"data:image/png;base64,{encoded}"
+                break
+            except Exception:
+                continue
+        if image_data_uri:
+            break
+
+    PDP_IMAGE_CACHE[cache_key] = image_data_uri
+    return image_data_uri
 _load_model_metrics()
 
 custom_css = """
@@ -279,25 +542,29 @@ def _build_metrics_grid(metric_name: str) -> str:
         metric_data = {}
 
     highlight_pair = HIGHLIGHT_MAP.get(metric_name)
+    if not highlight_pair:
+        highlight_pair = _resolve_metric_selection(metric_name)
 
     cells = ["<div class='metrics-grid mt-3'>"]
 
     # Header row
-    cells.append("<div class='metrics-grid__header'>버전</div>")
-    for model in MODELS:
-        cells.append(f"<div class='metrics-grid__header'>{model}</div>")
+    cells.append("<div class='metrics-grid__header'>모델</div>")
+    for version in VERSIONS:
+        cells.append(f"<div class='metrics-grid__header'>{version}</div>")
 
     # Body rows
-    for version in VERSIONS:
-        cells.append("<div class='metrics-grid__row-header'>{}</div>".format(version))
-        for model in MODELS:
+    for model in MODELS:
+        cells.append("<div class='metrics-grid__row-header'>{}</div>".format(model))
+        for version in VERSIONS:
             value = metric_data.get(model, {}).get(version)
             cell_classes = ["metrics-grid__cell"]
+
             if highlight_pair and (model, version) == highlight_pair:
                 cell_classes.append("metrics-grid__cell--highlight")
+
             display_value = "-" if value is None else f"{value:.3f}"
             cells.append(
-                f"<div class='{' '.join(cell_classes)}'>{display_value}</div>"
+                f"<div class=\"{' '.join(cell_classes)}\">{display_value}</div>"
             )
 
     cells.append("</div>")
@@ -317,7 +584,7 @@ def _build_metric_button(button_id: str, label: str, active: bool) -> ui.Tag:
 
 
 def _build_selection_details(metric_name: str) -> ui.Tag:
-    highlight = HIGHLIGHT_MAP.get(metric_name)
+    highlight = _resolve_metric_selection(metric_name)
     if not highlight:
         return ui.div("선택된 모델 정보가 없습니다.", class_="text-muted")
 
@@ -348,139 +615,65 @@ def _build_selection_details(metric_name: str) -> ui.Tag:
         class_="metric-detail-card",
     )
 
-
-def _generate_mock_importance(model_name: str) -> pd.DataFrame:
-    mock_data = {
-        "LightGBM": {
-            "features": [
-                "high_section_speed",
-                "cast_pressure",
-                "upper_mold_temp1",
-                "physical_strength",
-                "coolant_temperature",
-            ],
-            "importance": [0.24, 0.19, 0.17, 0.14, 0.11],
-        },
-        "RandomForest": {
-            "features": [
-                "molten_temp",
-                "production_cycletime",
-                "low_section_speed",
-                "upper_mold_temp2",
-                "cast_pressure",
-            ],
-            "importance": [0.21, 0.18, 0.16, 0.13, 0.12],
-        },
-        "XGBoost": {
-            "features": [
-                "working",
-                "EMS_operation_time",
-                "lower_mold_temp1",
-                "sleeve_temperature",
-                "biscuit_thickness",
-            ],
-            "importance": [0.23, 0.20, 0.17, 0.15, 0.09],
-        },
-    }
-
-    entry = mock_data.get(model_name, mock_data["LightGBM"])
-    return pd.DataFrame(entry)
+def _format_feature_label(label: str) -> str:
+    return label.replace("__", " → ") if "__" in label else label
 
 
-def _generate_mock_best_params(model_name: str, version: str) -> dict[str, str]:
-    mock_params = {
-        "LightGBM": {
-            "num_leaves": "64",
-            "learning_rate": "0.045",
-            "feature_fraction": "0.72",
-            "bagging_fraction": "0.80",
-            "min_child_samples": "28",
-        },
-        "RandomForest": {
-            "n_estimators": "280",
-            "max_depth": "18",
-            "min_samples_split": "4",
-            "min_samples_leaf": "2",
-            "max_features": "sqrt",
-        },
-        "XGBoost": {
-            "max_depth": "6",
-            "eta": "0.11",
-            "subsample": "0.78",
-            "colsample_bytree": "0.74",
-            "gamma": "0.8",
-        },
-    }
-
-    params = mock_params.get(model_name, mock_params["LightGBM"]).copy()
-    params["model_version"] = version
-    return params
+def _format_param_name(name: str) -> str:
+    return name.replace("_", " ").title()
 
 
-def _generate_mock_shap_summary(model_name: str) -> pd.DataFrame:
-    mock_shap = {
-        "LightGBM": {
-            "feature": [
-                "high_section_speed",
-                "cast_pressure",
-                "upper_mold_temp1",
-                "coolant_temperature",
-                "physical_strength",
-            ],
-            "mean_abs_shap": [0.128, 0.104, 0.091, 0.075, 0.062],
-            "impact": ["양(+)", "양(+)", "음(-)", "양(+)", "음(-)"],
-        },
-        "RandomForest": {
-            "feature": [
-                "molten_temp",
-                "production_cycletime",
-                "low_section_speed",
-                "upper_mold_temp2",
-                "cast_pressure",
-            ],
-            "mean_abs_shap": [0.117, 0.101, 0.087, 0.073, 0.066],
-            "impact": ["양(+)", "음(-)", "양(+)", "음(-)", "양(+)"]
-        },
-        "XGBoost": {
-            "feature": [
-                "working",
-                "EMS_operation_time",
-                "lower_mold_temp1",
-                "sleeve_temperature",
-                "biscuit_thickness",
-            ],
-            "mean_abs_shap": [0.133, 0.118, 0.095, 0.082, 0.058],
-            "impact": ["음(-)", "양(+)", "양(+)", "음(-)", "양(+)"]
-        },
-    }
-
-    entry = mock_shap.get(model_name, mock_shap["LightGBM"])
-    return pd.DataFrame(entry)
+def _format_param_value(value: object) -> str:
+    if isinstance(value, (np.floating, float)):
+        float_val = float(value)
+        if float_val.is_integer():
+            return str(int(float_val))
+        return f"{float_val:.4f}".rstrip("0").rstrip(".")
+    if isinstance(value, (np.integer, int)):
+        return str(int(value))
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    return str(value)
 
 
-def _build_importance_tab(model_name: str) -> ui.Tag:
-    mock_df = _generate_mock_importance(model_name)
+def _build_importance_tab(model_name: str, version: str) -> ui.Tag:
+    importance_df = _get_feature_importance(model_name, version)
+
+    if importance_df.empty:
+        return ui.div("변수 중요도 정보를 불러올 수 없습니다.", class_="text-muted importance-card")
+
+    top_df = importance_df.head(5).copy()
+    top_df["feature"] = top_df["feature"].map(_format_feature_label)
+    plot_df = top_df.sort_values("normalized", ascending=True, ignore_index=True)
+
+    def _format_percent(value: float) -> str:
+        return f"{value * 100:.1f}%"
+
     fig = px.bar(
-        mock_df,
-        x="importance",
-        y="features",
+        plot_df,
+        x="normalized",
+        y="feature",
         orientation="h",
         title=None,
-        labels={"features": "변수", "importance": "중요도"},
+        labels={"feature": "변수", "normalized": "중요도 비율"},
+        text=plot_df["normalized"].map(_format_percent),
     )
+    max_range = float(min(1.0, max(plot_df["normalized"].max() * 1.15, 0.2)))
     fig.update_layout(
-        height=320,
+        height=280,
         margin=dict(l=10, r=10, t=10, b=10),
-        yaxis=dict(autorange="reversed"),
+        yaxis=dict(autorange=True),
+        xaxis=dict(range=[0, max_range]),
         plot_bgcolor="white",
+        showlegend=False,
     )
-    fig.update_traces(marker_color="#2A2D30")
+    fig.update_traces(marker_color="#2A2D30", textposition="outside", cliponaxis=False)
 
     return ui.div(
         ui.HTML(
             pio.to_html(
                 fig,
-                include_plotlyjs="cdn",
+                include_plotlyjs=True,
                 full_html=False,
                 config={"displayModeBar": False},
             )
@@ -490,14 +683,19 @@ def _build_importance_tab(model_name: str) -> ui.Tag:
 
 
 def _build_best_params_tab(model_name: str, version: str) -> ui.Tag:
-    params = _generate_mock_best_params(model_name, version)
+    params = _get_best_params(model_name, version)
+
+    if not params:
+        return ui.div("베스트 파라미터 정보를 불러올 수 없습니다.", class_="text-muted importance-card")
+
     rows = []
-    for key, value in params.items():
-        display_key = key.replace("_", " ").title()
+
+    for key in sorted(params.keys()):
+        value = params[key]
         rows.append(
             ui.tags.tr(
-                ui.tags.th(display_key),
-                ui.tags.td(value),
+                ui.tags.th(_format_param_name(key)),
+                ui.tags.td(_format_param_value(value)),
             )
         )
 
@@ -510,45 +708,31 @@ def _build_best_params_tab(model_name: str, version: str) -> ui.Tag:
     )
 
 
-def _build_shap_tab(model_name: str) -> ui.Tag:
-    shap_df = _generate_mock_shap_summary(model_name)
-    fig = px.bar(
-        shap_df,
-        x="mean_abs_shap",
-        y="feature",
-        orientation="h",
-        color="impact",
-        labels={"feature": "변수", "mean_abs_shap": "|SHAP| 평균", "impact": "영향 방향"},
-        color_discrete_map={"양(+)": "#2A2D30", "음(-)": "#8A9098"},
-    )
-    fig.update_layout(
-        height=280,
-        margin=dict(l=10, r=10, t=10, b=10),
-        yaxis=dict(autorange="reversed"),
-        xaxis=dict(range=[0, 0.16]),
-        plot_bgcolor="white",
-        legend_title_text="영향",
-    )
+def _build_pdp_tab(model_name: str, version: str) -> ui.Tag:
+    image_data_uri = _load_pdp_image(model_name, version)
+
+    if not image_data_uri:
+        return ui.div("PDP 이미지를 불러올 수 없습니다.", class_="text-muted importance-card")
+
+    alt_text = f"{model_name} {version} 모델의 부분 의존성(PDP) 시각화"
 
     return ui.div(
-        ui.HTML(
-            pio.to_html(
-                fig,
-                include_plotlyjs="cdn",
-                full_html=False,
-                config={"displayModeBar": False},
-            )
+        ui.tags.img(
+            src=image_data_uri,
+            alt=alt_text,
+            style="width: 100%; height: auto; border-radius: 12px; border: 1px solid #e3e6eb;",
         ),
-        ui.p("상위 중요 변수의 SHAP 값을 임의 데이터로 표시했습니다."),
         class_="importance-card",
     )
 
 
 def _build_insight_tabs(model_name: str, version: str) -> ui.Tag:
     navset = ui.navset_tab(
-        ui.nav_panel("변수 중요도", _build_importance_tab(model_name)),
-        ui.nav_panel("베스트 파라미터", _build_best_params_tab(model_name, version)),
-        ui.nav_panel("SHAP 설명", _build_shap_tab(model_name)),
+        ui.nav_panel("변수 중요도", _build_importance_tab(model_name, version), value="importance"),
+        ui.nav_panel("베스트 파라미터", _build_best_params_tab(model_name, version), value="best_params"),
+        ui.nav_panel("PDP", _build_pdp_tab(model_name, version), value="pdp"),
+        id="insight_nav",
+        selected="importance",
     )
     return ui.div(navset, class_="insight-tabset")
 
@@ -591,7 +775,8 @@ def panel_body():
 def panel():
     return ui.nav_panel("모델 성능 평가", panel_body())
 def server(input, output, session):
-    active_metric = reactive.Value("ROC-AUC")
+    _load_model_metrics()
+    active_metric = reactive.Value("F1-Score")
 
     @reactive.effect
     @reactive.event(input.btn_metric_roc_auc)
@@ -637,7 +822,7 @@ def server(input, output, session):
     @render.ui
     def insight_tabs():
         metric_name = active_metric.get()
-        highlight = HIGHLIGHT_MAP.get(metric_name)
+        highlight = _resolve_metric_selection(metric_name)
         if not highlight:
             return ui.div("세부 인사이트 정보가 없습니다.", class_="text-muted")
 
