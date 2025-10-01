@@ -16,6 +16,9 @@ df = pd.read_csv(DATA_FILE, encoding="utf-8", low_memory=False)
 df['mold_code'] = df['mold_code'].astype(str)
 df['passorfail'] = df['passorfail'].astype(str)
 
+# registration_time을 datetime으로 변환
+df['registration_time'] = pd.to_datetime(df['registration_time'])
+
 def get_variable_mapping():
     """영문 변수명을 한글(영문)-(타입) 형식으로 매핑"""
     
@@ -105,7 +108,7 @@ def panel():
         "EDA 분석",
         ui.layout_sidebar(
             ui.sidebar(
-                ui.h4("📊 변수 선택"),
+                ui.h4("변수 선택"),
                 ui.p("두 변수가 같으면 히스토그램, 다르면 산점도/박스플롯/히트맵이 표시됩니다.", 
                      style="font-size: 0.9em; color: #666;"),
                 
@@ -127,6 +130,13 @@ def panel():
                 
                 ui.hr(),
                 
+                # 시계열 모드 체크박스
+                ui.input_checkbox("timeseries_mode", "시계열 모드"),
+                ui.p("시계열 모드: x축=시간, y축=변수 1 (변수 2 무시)", 
+                     style="font-size: 0.85em; color: #666; margin-top: -10px;"),
+                
+                ui.hr(),
+                
                 # 선택된 변수 정보 표시
                 ui.output_text("selection_info"),
                 
@@ -134,24 +144,27 @@ def panel():
             ),
             
             ui.div(
-                ui.h3("🔍 탐색적 데이터 분석 (EDA)"),
+                ui.h3("탐색적 데이터 분석 (EDA)"),
                 
-                # 데이터셋 정보 + 선택된 변수 통계 (통합)
-                ui.card(
-                    ui.card_header("📋 데이터셋 정보 및 통계"),
-                    ui.div(
-                        ui.output_text("data_info"),
-                        ui.hr(),
-                        ui.output_data_frame("selected_stats")
-                    )
-                ),
-                
-                ui.br(),
-                
-                # 시각화 결과
-                ui.card(
-                    ui.card_header("📈 시각화 결과"),
-                    ui.output_plot("eda_plots", height="600px")
+                # 가로 배치: 데이터셋 정보 및 통계 + 시각화 결과
+                ui.layout_columns(
+                    # 왼쪽: 데이터셋 정보 + 선택된 변수 통계
+                    ui.card(
+                        ui.card_header("데이터셋 정보 및 통계"),
+                        ui.div(
+                            ui.output_text("data_info"),
+                            ui.hr(),
+                            ui.output_data_frame("selected_stats")
+                        )
+                    ),
+                    
+                    # 오른쪽: 시각화 결과
+                    ui.card(
+                        ui.card_header("시각화 결과"),
+                        ui.output_plot("eda_plots", width="100%", height="800px")  # 높이 증가
+                    ),
+                    
+                    col_widths=[4, 8]  # 왼쪽 4칸, 오른쪽 8칸 (총 12칸)
                 )
             )
         )
@@ -171,6 +184,10 @@ def server(input, output, session):
         var1 = input.var1()
         var2 = input.var2()
         
+        # 시계열 모드에서는 변수 1만 사용
+        if input.timeseries_mode():
+            return [var1] if var1 else []
+        
         if var1 and var2:
             if var1 == var2:
                 return [var1]
@@ -188,11 +205,20 @@ def server(input, output, session):
     def selection_info():
         var1 = input.var1()
         var2 = input.var2()
+        timeseries = input.timeseries_mode()
+        
+        if timeseries:
+            if not var1:
+                return "시계열 모드\n변수 1을 선택해주세요"
+            col_types = classify_columns(df)
+            is_numeric = var1 in col_types['numeric']
+            viz_type = "산점도" if is_numeric else "히스토그램"
+            return f"시계열 모드\nx축: 시간, y축: 변수 1\n{viz_type} 표시"
         
         if not var1 or not var2:
-            return "⚠️ 두 변수를 모두 선택해주세요"
+            return "두 변수를 모두 선택해주세요"
         elif var1 == var2:
-            return f"✅ 동일 변수 선택\n→ 히스토그램 표시"
+            return f"동일 변수 선택\n히스토그램 표시"
         else:
             col_types = classify_columns(df)
             is_numeric1 = var1 in col_types['numeric']
@@ -205,17 +231,17 @@ def server(input, output, session):
             else:
                 viz_type = "히트맵"
             
-            return f"✅ 두 변수 선택\n→ {viz_type} 표시"
+            return f"두 변수 선택\n{viz_type} 표시"
     
     @output
     @render.text
     def data_info():
         selected = get_selected_vars()
         
-        info_text = f"📊 전체 데이터 행 수: {len(df):,}개"
+        info_text = f"전체 데이터 행 수: {len(df):,}개"
         
         if len(selected) > 0:
-            info_text += "\n\n❌ 선택된 변수의 결측값:"
+            info_text += "\n\n선택된 변수의 결측값:"
             for col in selected:
                 korean_name = get_korean_name(col)
                 missing_count = df[col].isnull().sum()
@@ -284,6 +310,11 @@ def server(input, output, session):
     def eda_plots():
         import matplotlib.pyplot as plt
         import seaborn as sns
+        import matplotlib.dates as mdates
+        
+        # DPI 설정 (해상도 조정)
+        plt.rcParams['figure.dpi'] = 80  # 화면 표시용 DPI
+        plt.rcParams['savefig.dpi'] = 80  # 저장용 DPI
         
         # 한글 폰트 설정 (맥/윈도우 호환)
         try:
@@ -298,12 +329,103 @@ def server(input, output, session):
         
         var1 = input.var1()
         var2 = input.var2()
+        timeseries = input.timeseries_mode()
         
-        # 변수가 선택되지 않은 경우
+        # 시계열 모드
+        if timeseries:
+            if not var1:
+                fig, ax = plt.subplots(figsize=(7, 4))
+                ax.text(0.5, 0.5, '변수 1을 선택해주세요', 
+                       ha='center', va='center', fontsize=16)
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+                ax.axis('off')
+                return fig
+            
+            col = var1
+            korean_name = get_korean_name(col)
+            col_types = classify_columns(df)
+            is_numeric = col in col_types['numeric']
+            
+            # 시간 데이터 준비
+            plot_df = df[['registration_time', col]].dropna()
+            plot_df = plot_df.sort_values('registration_time')
+            
+            # 데이터 포인트 수에 따라 그래프 너비 조정 (화면에 맞게 적절히 조정)
+            num_points = len(plot_df)
+            # 기본 너비 6인치, 최대 7인치로 제한
+            fig_width = min(7, max(6, num_points / 5000))
+            
+            fig, ax = plt.subplots(figsize=(fig_width, 3.5))  # 더 작은 높이
+            
+            if is_numeric:
+                # 수치형: 산점도 - 데이터 샘플링으로 성능 개선
+                if num_points > 5000:
+                    # 데이터가 많으면 샘플링
+                    sample_size = min(5000, num_points)
+                    plot_df_sample = plot_df.sample(n=sample_size).sort_values('registration_time')
+                    ax.scatter(plot_df_sample['registration_time'], plot_df_sample[col], 
+                             alpha=0.5, s=3, color='steelblue')  # 점 크기 감소
+                    ax.set_title(f'{korean_name} 시계열 추이 (산점도 - {sample_size:,}/{num_points:,}개 표시)', 
+                               fontsize=11, pad=15)  # 폰트 크기 감소
+                else:
+                    ax.scatter(plot_df['registration_time'], plot_df[col], 
+                             alpha=0.5, s=3, color='steelblue')  # 점 크기 감소
+                    ax.set_title(f'{korean_name} 시계열 추이 (산점도)', fontsize=11, pad=15)  # 폰트 크기 감소
+                
+                ax.set_ylabel(korean_name, fontsize=10)  # 폰트 크기 감소
+                
+                # 날짜 포맷 설정 - 데이터 범위에 따라 적절히 조정
+                date_range = (plot_df['registration_time'].max() - plot_df['registration_time'].min()).days
+                if date_range > 30:
+                    ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, date_range//10)))
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                else:
+                    ax.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+                
+                plt.xticks(rotation=45, ha='right')
+            else:
+                # 범주형: 일자별 히스토그램
+                plot_df['date'] = plot_df['registration_time'].dt.date
+                value_counts = plot_df.groupby(['date', col]).size().unstack(fill_value=0)
+                
+                # 날짜를 datetime으로 변환
+                value_counts.index = pd.to_datetime(value_counts.index)
+                
+                # 날짜가 많으면 적절히 그룹화
+                num_dates = len(value_counts)
+                if num_dates > 30:
+                    # 주 단위로 그룹화
+                    value_counts = value_counts.resample('W').sum()
+                    ax.set_title(f'{korean_name} 시계열 분포 (주 단위 히스토그램)', fontsize=14, pad=20)
+                else:
+                    ax.set_title(f'{korean_name} 시계열 분포 (일 단위 히스토그램)', fontsize=14, pad=20)
+                
+                value_counts.plot(kind='bar', stacked=True, ax=ax, alpha=0.7, width=0.8)
+                ax.set_ylabel('빈도', fontsize=12)
+                ax.legend(title=korean_name, bbox_to_anchor=(1.05, 1), loc='upper left')
+                
+                # x축 레이블 조정
+                total_dates = len(value_counts)
+                tick_interval = max(1, total_dates // 10)
+                tick_positions = range(0, total_dates, tick_interval)
+                tick_labels = [value_counts.index[i].strftime('%Y-%m-%d') if i < total_dates else '' 
+                             for i in tick_positions]
+                ax.set_xticks(tick_positions)
+                ax.set_xticklabels(tick_labels, rotation=45, ha='right')
+            
+            ax.set_xlabel('시간', fontsize=12)
+            ax.grid(True, alpha=0.3)
+            
+            plt.tight_layout(pad=1.0)  # 패딩 조정
+            return fig
+        
+        # 일반 모드 (기존 코드)
         if not var1 or not var2:
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(6, 3.5))
             ax.text(0.5, 0.5, '두 변수를 모두 선택해주세요', 
-                   ha='center', va='center', fontsize=16)
+                   ha='center', va='center', fontsize=14)
             ax.set_xlim(0, 1)
             ax.set_ylim(0, 1)
             ax.axis('off')
@@ -319,7 +441,7 @@ def server(input, output, session):
         if var1 == var2:
             col = var1
             korean_name = korean_name1
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(6, 3.5))  # 더 작은 크기
             
             # 변수 타입 확인
             is_numeric = col in col_types['numeric']
@@ -328,9 +450,9 @@ def server(input, output, session):
             if is_numeric:
                 data_clean = df[col].dropna()
                 ax.hist(data_clean, bins=30, alpha=0.7, edgecolor='black', color='steelblue')
-                ax.set_title(f'{korean_name} 분포', fontsize=14, pad=20)
-                ax.set_xlabel(korean_name, fontsize=12)
-                ax.set_ylabel('빈도', fontsize=12)
+                ax.set_title(f'{korean_name} 분포', fontsize=11, pad=15)
+                ax.set_xlabel(korean_name, fontsize=10)
+                ax.set_ylabel('빈도', fontsize=10)
                 ax.grid(axis='y', alpha=0.3)
             
             # 범주형 변수: 막대그래프
@@ -339,17 +461,17 @@ def server(input, output, session):
                 value_counts = data_with_nan.value_counts().head(15)
                 
                 bars = ax.bar(range(len(value_counts)), value_counts.values, color='coral', alpha=0.7)
-                ax.set_title(f'{korean_name} 분포', fontsize=14, pad=20)
-                ax.set_xlabel(korean_name, fontsize=12)
-                ax.set_ylabel('빈도', fontsize=12)
+                ax.set_title(f'{korean_name} 분포', fontsize=11, pad=15)
+                ax.set_xlabel(korean_name, fontsize=10)
+                ax.set_ylabel('빈도', fontsize=10)
                 ax.set_xticks(range(len(value_counts)))
-                ax.set_xticklabels(value_counts.index, rotation=45, ha='right')
+                ax.set_xticklabels(value_counts.index, rotation=45, ha='right', fontsize=8)
                 ax.grid(axis='y', alpha=0.3)
                 
                 for i, bar in enumerate(bars):
                     height = bar.get_height()
                     ax.text(bar.get_x() + bar.get_width()/2., height,
-                           f'{int(height):,}', ha='center', va='bottom', fontsize=9)
+                           f'{int(height):,}', ha='center', va='bottom', fontsize=8)
         
         # 다른 변수 선택: 산점도/박스플롯/히트맵
         else:
@@ -359,22 +481,30 @@ def server(input, output, session):
             is_numeric1 = col1 in col_types['numeric']
             is_numeric2 = col2 in col_types['numeric']
             
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(6, 3.5))  # 더 작은 크기
             
             # Case 1: 둘 다 수치형 → 산점도
             if is_numeric1 and is_numeric2:
                 plot_df = df[[col1, col2]].dropna()
                 
-                ax.scatter(plot_df[col1], plot_df[col2], alpha=0.5, s=20, color='steelblue')
-                ax.set_xlabel(korean_name1, fontsize=12)
-                ax.set_ylabel(korean_name2, fontsize=12)
-                ax.set_title(f'{korean_name1} vs {korean_name2} (산점도)\n(유효 데이터: {len(plot_df):,}개)', fontsize=14, pad=20)
+                # 데이터가 많으면 샘플링
+                if len(plot_df) > 10000:
+                    plot_df = plot_df.sample(n=10000)
+                    ax.set_title(f'{korean_name1} vs {korean_name2} (산점도)\n(샘플 10,000개)', 
+                               fontsize=11, pad=15)
+                else:
+                    ax.set_title(f'{korean_name1} vs {korean_name2} (산점도)\n(유효 데이터: {len(plot_df):,}개)', 
+                               fontsize=11, pad=15)
+                
+                ax.scatter(plot_df[col1], plot_df[col2], alpha=0.5, s=10, color='steelblue')
+                ax.set_xlabel(korean_name1, fontsize=10)
+                ax.set_ylabel(korean_name2, fontsize=10)
                 ax.grid(True, alpha=0.3)
                 
                 # 상관계수
                 correlation = plot_df[col1].corr(plot_df[col2])
                 ax.text(0.05, 0.95, f'상관계수: {correlation:.3f}', 
-                       transform=ax.transAxes, fontsize=11,
+                       transform=ax.transAxes, fontsize=9,
                        verticalalignment='top',
                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
             
@@ -404,11 +534,11 @@ def server(input, output, session):
                     patch.set_facecolor('lightblue')
                     patch.set_alpha(0.7)
                 
-                ax.set_xlabel(cat_korean, fontsize=12)
-                ax.set_ylabel(num_korean, fontsize=12)
-                ax.set_title(f'{cat_korean}별 {num_korean} 분포 (박스플롯)', fontsize=14, pad=20)
+                ax.set_xlabel(cat_korean, fontsize=10)
+                ax.set_ylabel(num_korean, fontsize=10)
+                ax.set_title(f'{cat_korean}별 {num_korean} 분포 (박스플롯)', fontsize=11, pad=15)
                 ax.grid(axis='y', alpha=0.3)
-                plt.xticks(rotation=45, ha='right')
+                plt.xticks(rotation=45, ha='right', fontsize=8)
             
             # Case 3: 둘 다 범주형 → 히트맵
             else:
@@ -425,13 +555,17 @@ def server(input, output, session):
                 
                 crosstab = pd.crosstab(plot_df[col1], plot_df[col2])
                 
+                # 히트맵 크기에 맞게 figure 크기 조정
+                fig.set_figwidth(min(6, max(4, crosstab.shape[1] * 0.2)))
+                fig.set_figheight(min(3.5, max(2.5, crosstab.shape[0] * 0.2)))
+                
                 sns.heatmap(crosstab, annot=True, fmt='d', cmap='YlOrRd', ax=ax, 
-                           cbar_kws={'label': '빈도'})
-                ax.set_title(f'{korean_name1} vs {korean_name2} 교차표 (히트맵)', fontsize=14, pad=20)
-                ax.set_xlabel(korean_name2, fontsize=12)
-                ax.set_ylabel(korean_name1, fontsize=12)
-                plt.xticks(rotation=45, ha='right')
-                plt.yticks(rotation=0)
+                           cbar_kws={'label': '빈도'}, annot_kws={'size': 8})
+                ax.set_title(f'{korean_name1} vs {korean_name2} 교차표 (히트맵)', fontsize=11, pad=15)
+                ax.set_xlabel(korean_name2, fontsize=10)
+                ax.set_ylabel(korean_name1, fontsize=10)
+                plt.xticks(rotation=45, ha='right', fontsize=8)
+                plt.yticks(rotation=0, fontsize=8)
         
-        plt.tight_layout()
+        plt.tight_layout(pad=1.0)  # 패딩 조정
         return fig

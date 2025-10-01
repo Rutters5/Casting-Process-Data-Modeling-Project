@@ -1,0 +1,121 @@
+import pandas as pd
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer
+
+# 경로 설정
+BASE_DIR = Path(__file__).resolve().parents[2]
+DATA_FILE = BASE_DIR / "data" / "raw" / "train.csv"
+OUTPUT_FILE_TRAIN = BASE_DIR / "data" / "processed" / "train_v0.csv"
+OUTPUT_FILE_TEST = BASE_DIR / "data" / "processed" / "test_v0.csv"
+
+# 데이터 로드
+df = pd.read_csv(DATA_FILE)
+
+# 데이터 정보
+df.info()
+df.columns
+df.isna().sum()
+
+# tryshot_signal 결측치 'N'으로 채우기
+df["tryshot_signal"].fillna('N', inplace=True)
+
+# 결측치 확인
+df[df.columns[df.isna().sum() > 0]].isna().sum()
+
+# 데이터 분할
+train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
+
+# ==================================================================================================
+# 범주형으로 처리할 컬럼
+# ==================================================================================================
+train_df["mold_code"] = train_df["mold_code"].astype('object')
+train_df["EMS_operation_time"] = train_df["EMS_operation_time"].astype('object')
+
+test_df["mold_code"] = test_df["mold_code"].astype('object')
+test_df["EMS_operation_time"] = test_df["EMS_operation_time"].astype('object')
+
+
+# ==================================================================================================
+# date, time 컬럼명 swap 및 타입 변환
+# ==================================================================================================
+train_df = train_df.rename(columns={'date': '__tmp_swap__'})
+train_df = train_df.rename(columns={'time': 'date', '__tmp_swap__': 'time'})
+train_df["date"] = pd.to_datetime(train_df["date"], format="%Y-%m-%d")
+train_df["time"] = pd.to_datetime(train_df["time"], format="%H:%M:%S")
+
+test_df = test_df.rename(columns={'date': '__tmp_swap__'})
+test_df = test_df.rename(columns={'time': 'date', '__tmp_swap__': 'time'})
+test_df["date"] = pd.to_datetime(test_df["date"], format="%Y-%m-%d")
+test_df["time"] = pd.to_datetime(test_df["time"], format="%H:%M:%S")
+
+
+# ==================================================================================================
+# hour, weekday 컬럼 추가
+# ==================================================================================================
+train_df["hour"] = train_df["time"].dt.hour
+train_df["weekday"] = train_df["date"].dt.weekday
+
+test_df["hour"] = test_df["time"].dt.hour
+test_df["weekday"] = test_df["date"].dt.weekday
+
+# ==================================================================================================
+# 단일값 컬럼 및 불필요한 컬럼 제거
+# ==================================================================================================
+# ID 컬럼 제거
+train_df.drop(columns=["id"], inplace=True)
+test_df.drop(columns=["id"], inplace=True)
+# 단일값 컬럼 제거
+train_df.drop(columns=["line", "name", "mold_name"], inplace=True)
+test_df.drop(columns=["line", "name", "mold_name"], inplace=True)
+# 중복 컬럼 제거
+train_df.drop(columns=["registration_time"], inplace=True)
+test_df.drop(columns=["registration_time"], inplace=True)
+
+# ==================================================================================================
+# 대부분이 결측치인 행 확인 및 제거
+# 해당 행이 유일한 emergency_stop 결측행이여서 이 행이 긴급중단을 나타내는 행이라고 판단
+# 모델 예측 끝난 후에 ‘emergency_stop’이 결측인 경우 무조건 불량이라고 판정 내도록 만들기
+# ==================================================================================================
+train_df[train_df["emergency_stop"].isna()]
+train_df.drop(train_df[train_df["emergency_stop"].isna()].index, inplace=True)
+
+# ==================================================================================================
+# 컬럼 제거 (upper_mold_temp3)
+# 결측치 총 312개, 이상치(1449.0) 64356개로 정보값 매우 왜곡
+# upper_mold_temp3가 결측일 때 mold_code_8412, lower_mold_temp3, molten_volume도 결측
+# 이상치가 1449.0으로 고정이라서 센서가 고장났을 경우 1449라는 코드를 내보내는 것으로 가정하고 upper_mold_temp3 열을 제거하기로 함
+# ==================================================================================================
+train_df.drop(columns=["upper_mold_temp3"], inplace=True)
+test_df.drop(columns=["upper_mold_temp3"], inplace=True)
+
+# ==================================================================================================
+# 컬럼 제거 (lower_mold_temp3)
+# 이상치(1449.0) 71651개, 결측치 312개로 upper_mold_temp3와 마찬가지로 제거하기로 함
+# ==================================================================================================
+train_df.drop(columns=["lower_mold_temp3"], inplace=True)
+test_df.drop(columns=["lower_mold_temp3"], inplace=True)
+
+# ==================================================================================================
+# 컬럼 제거 (heating_furnace)
+# 결측치 총 40880개 (mold_code 8600은 전부 다 결측치(2960개), 8722도 전부 다 결측치(19664개))
+# 일단은 제외 (3개 이상의 종류이지만 구분이 어려움, 결과에 큰 영향을 미치지 않을 것이라 판단)
+# ==================================================================================================
+train_df.drop(columns=["heating_furnace"], inplace=True)
+test_df.drop(columns=["heating_furnace"], inplace=True)
+
+# ==================================================================================================
+# 컬럼 제거 (molten_volume)
+# ==================================================================================================
+train_df.drop(columns=["molten_volume"], inplace=True)
+test_df.drop(columns=["molten_volume"], inplace=True)
+
+# ==================================================================================================
+# 결측치 처리 (molten_temp) 평균으로 대체
+# ==================================================================================================
+imputer = SimpleImputer(strategy='mean')
+train_df["molten_temp"] = imputer.fit_transform(train_df[["molten_temp"]])
+test_df["molten_temp"] = imputer.transform(test_df[["molten_temp"]])
+
+train_df.to_csv(OUTPUT_FILE_TRAIN)
+test_df.to_csv(OUTPUT_FILE_TEST)

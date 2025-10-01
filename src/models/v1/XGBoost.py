@@ -362,7 +362,10 @@ print("Confusion matrix:\n", cm)
 # 모델 저장
 # ---------------------------
 artifact_obj = {
-    "model_clf": clf_final,
+    "model": clf_final,
+    "scaler": (scaler_full if numeric_cols else None),
+    "ordinal_encoder": (ord_enc_full if cat_cols else None),
+    "onehot_encoder": (ohe_full if cat_cols else None),
     "best_params": study.best_trial.params,
     "operating_threshold": thr_oper
 }
