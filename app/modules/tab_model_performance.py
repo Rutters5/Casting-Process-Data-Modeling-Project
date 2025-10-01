@@ -1,41 +1,114 @@
 # modules/tab_process_explanation.py
+from pathlib import Path
+
 from shiny import ui, reactive, render
 import plotly.express as px
 import plotly.io as pio
 import pandas as pd
+from pathlib import Path
+
+APP_DIR = Path(__file__).resolve().parents[1]
+SCORE_V0_PATH = APP_DIR / "data" / "models" / "v0"
+SCORE_V1_PATH = APP_DIR / "data" / "models" / "v1"
+SCORE_V2_PATH = APP_DIR / "data" / "models" / "v2"
+
+SCORE_V0_LGBM = SCORE_V0_PATH / "LightGBM_v0_scores.csv"
+SCORE_V1_LGBM = SCORE_V1_PATH / "LightGBM_v1_scores.csv"
+SCORE_V2_LGBM = SCORE_V2_PATH / "LightGBM_v2_scores.csv"
+
+SCORE_V0_RF = SCORE_V0_PATH / "RandomForest_v0_scores.csv"
+SCORE_V1_RF = SCORE_V1_PATH / "RandomForest_v1_scores.csv"
+SCORE_V2_RF = SCORE_V2_PATH / "RandomForest_v2_scores.csv"
+
+SCORE_V0_XGB = SCORE_V0_PATH / "XGBoost_v0_scores.csv"
+SCORE_V1_XGB = SCORE_V1_PATH / "XGBoost_v1_scores.csv"
+SCORE_V2_XGB = SCORE_V2_PATH / "XGBoost_v2_scores.csv"
 
 MODELS = ["LightGBM", "RandomForest", "XGBoost"]
 VERSIONS = ["v0", "v1", "v2"]
 
-METRIC_VALUES = {
-    "ROC-AUC": {
-        "LightGBM": {"v0": 0.914, "v1": 0.927, "v2": 0.932},
-        "RandomForest": {"v0": 0.901, "v1": 0.918, "v2": 0.925},
-        "XGBoost": {"v0": 0.908, "v1": 0.920, "v2": 0.934},
-    },
-    "F1-Score": {
-        "LightGBM": {"v0": 0.578, "v1": 0.592, "v2": 0.601},
-        "RandomForest": {"v0": 0.565, "v1": 0.579, "v2": 0.587},
-        "XGBoost": {"v0": 0.571, "v1": 0.588, "v2": 0.596},
-    },
-    "Recall": {
-        "LightGBM": {"v0": 0.612, "v1": 0.638, "v2": 0.645},
-        "RandomForest": {"v0": 0.598, "v1": 0.624, "v2": 0.633},
-        "XGBoost": {"v0": 0.605, "v1": 0.629, "v2": 0.649},
-    },
-    "Precision": {
-        "LightGBM": {"v0": 0.552, "v1": 0.566, "v2": 0.574},
-        "RandomForest": {"v0": 0.538, "v1": 0.553, "v2": 0.561},
-        "XGBoost": {"v0": 0.545, "v1": 0.559, "v2": 0.568},
-    },
+DISPLAY_METRIC_MAP = {
+    "ROC-AUC": "roc_auc",
+    "F1-Score": "f1_score",
+    "Recall": "recall",
+    "Precision": "precision",
 }
 
-HIGHLIGHT_MAP = {
-    "ROC-AUC": ("LightGBM", "v1"),
-    "F1-Score": ("RandomForest", "v0"),
-    "Recall": ("XGBoost", "v2"),
-    "Precision": ("LightGBM", "v0"),
-}
+DETAIL_METRIC_FIELDS = [
+    ("PR-AUC", "pr_auc"),
+    ("ROC-AUC", "roc_auc"),
+    ("Accuracy", "accuracy"),
+    ("Precision", "precision"),
+    ("Recall", "recall"),
+    ("F1-Score", "f1_score"),
+    ("Operating Threshold", "operating_threshold"),
+]
+
+APP_DIR = Path(__file__).resolve().parents[1]
+MODELS_DIR = APP_DIR / "data" / "models"
+
+MODEL_METRICS: dict[str, dict[str, dict[str, float]]] = {model: {} for model in MODELS}
+METRIC_VALUES: dict[str, dict[str, dict[str, float]]] = {}
+HIGHLIGHT_MAP: dict[str, tuple[str, str] | None] = {}
+
+
+def _load_model_metrics() -> None:
+    """Load model score summaries from data/models directory."""
+
+    global MODEL_METRICS, METRIC_VALUES, HIGHLIGHT_MAP
+
+    # Reset containers
+    MODEL_METRICS = {model: {} for model in MODELS}
+    METRIC_VALUES = {metric: {model: {} for model in MODELS} for metric in DISPLAY_METRIC_MAP.keys()}
+    HIGHLIGHT_MAP = {}
+
+    for version in VERSIONS:
+        version_dir = MODELS_DIR / version
+        if not version_dir.exists():
+            continue
+
+        for model in MODELS:
+            file_name = f"{model}_{version}_scores.csv"
+            file_path = version_dir / file_name
+            if not file_path.exists():
+                continue
+
+            try:
+                df = pd.read_csv(file_path)
+            except Exception:
+                continue
+
+            if df.empty:
+                continue
+
+            row = df.iloc[0].to_dict()
+            MODEL_METRICS[model][version] = row
+
+            for display_label, column_name in DISPLAY_METRIC_MAP.items():
+                value = row.get(column_name)
+                if pd.notna(value):
+                    METRIC_VALUES[display_label][model][version] = float(value)
+
+    for display_label, column_name in DISPLAY_METRIC_MAP.items():
+        best_value = None
+        best_pair: tuple[str, str] | None = None
+
+        for model in MODELS:
+            for version in VERSIONS:
+                value = MODEL_METRICS.get(model, {}).get(version, {}).get(column_name)
+                if value is None or pd.isna(value):
+                    continue
+                if best_value is None or value > best_value:
+                    best_value = value
+                    best_pair = (model, version)
+
+        if best_pair:
+            HIGHLIGHT_MAP[display_label] = best_pair
+        else:
+            HIGHLIGHT_MAP[display_label] = None
+
+
+_load_model_metrics()
 
 custom_css = """
 <style>
@@ -206,12 +279,17 @@ def _build_selection_details(metric_name: str) -> ui.Tag:
 
     model_name, version = highlight
     metric_rows = []
-    for metric_label in ["ROC-AUC", "F1-Score", "Recall", "Precision"]:
-        value = METRIC_VALUES.get(metric_label, {}).get(model_name, {}).get(version)
-        display_value = "-" if value is None else f"{value:.3f}"
+    metrics_dict = MODEL_METRICS.get(model_name, {}).get(version, {})
+
+    for display_label, column_name in DETAIL_METRIC_FIELDS:
+        value = metrics_dict.get(column_name)
+        if value is None or pd.isna(value):
+            display_value = "-"
+        else:
+            display_value = f"{float(value):.3f}"
         metric_rows.append(
             ui.tags.tr(
-                ui.tags.th(metric_label),
+                ui.tags.th(display_label),
                 ui.tags.td(display_value),
             )
         )
@@ -289,7 +367,7 @@ def panel():
                     ui.card_body(
                         ui.output_ui("selection_details"),
                         ui.output_ui("importance_chart"),
-                        class_="w-100 h-100",
+                        class_="w-100 h-100 d-flex flex-column gap-3",
                     ),
                     full_height=True,
                     class_="h-100 d-flex flex-column",
