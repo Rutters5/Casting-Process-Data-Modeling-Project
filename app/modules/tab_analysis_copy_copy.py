@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 
 # --- 경로 및 자원 로드 ---
 BASE_DIR = Path(__file__).resolve().parents[2]
-DATA_FILE = BASE_DIR / "data" / "processed" / "test_v2.csv"
-MODEL_FILE = BASE_DIR / "data" / "models" / "v2" / "XGBoost_v2.pkl"
+DATA_FILE = BASE_DIR / "data" / "processed" / "test_v1.csv"
+MODEL_FILE = BASE_DIR / "data" / "models" / "v1" / "LightGBM_v1.pkl"
 
 df = pd.read_csv(DATA_FILE, encoding="utf-8", low_memory=False)
 artifact = joblib.load(MODEL_FILE)
