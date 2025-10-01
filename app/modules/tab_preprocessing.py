@@ -5,53 +5,49 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.lines import Line2D
+import warnings
+
+
+# 폰트 관련 경고 메시지 숨기기
+warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+warnings.filterwarnings('ignore', message='findfont')
 
 # Shiny 버전에 따라 ui.nav 또는 ui.nav_panel을 사용
 NAV = getattr(ui, "nav", ui.nav_panel)
 
 # --- 경로 설정 ---
 BASE_DIR = Path(__file__).resolve().parents[2]
+APP_DIR = Path(__file__).resolve().parents[1]
 PDF_FILE  = BASE_DIR / "reports" / "preprocessing_report.pdf"
 DATA_FILE = BASE_DIR / "data" / "raw" / "train.csv"
 
-# ===== Matplotlib 한글 폰트 =====
-plt.rcParams["font.family"] = [
-    "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR",
-    "NanumGothic", "DejaVu Sans", "Arial Unicode MS", "sans-serif"
-]
+# ===== Matplotlib 한글 폰트 (실제 존재하는 폰트만 사용) =====
+plt.rcParams["font.family"] = ["Malgun Gothic", "DejaVu Sans", "sans-serif"]
 plt.rcParams["axes.unicode_minus"] = False
-
 # --- 상세 컨텐츠(텍스트) ---
 DETAILS = {
     "drop_heating_furnace": (
-        "### 단일 칼럼 제거 — heating_furnace 열\n"
         "- 결측이 매우 많고 기본 모델에서 변수 중요도 낮음 → 학습에서 제거"
     ),
     "drop_molten_volume": (
-        "### 단일 칼럼 제거 — molten_volume 열\n"
         "- 결측이 매우 많고 기본 모델에서 변수 중요도 낮음 → 학습에서 제거"
     ),
     "drop_mold_temp3": (
-        "### 단일 칼럼 제거 — upper/lower_mold_temp3 열\n"
         "- 이상치 1449.0을 센서 오류 코드로 가정 → 두 칼럼 모두 제거"
     ),
     "drop_etc": (
-        "### 단일 칼럼 제거 — registration_time 열\n"
         "- registration_time: 'time'+'date' 결합 정보(중복 의미) → 제거"
     ),
     "impute_molten_temp": (
-        "### 결측치 처리 — molten_temp 열\n"
         "- molten_temp 결측이 연속되어 나오는 경우 거의 없음 → 앞뒤 행들과 이어지도록 두 행들의 평균으로 대치\n"
         "- train 데이터에서는 이전 행과 다음 행의 molten_temp 값들의 평균으로 대치\n"
         "- test 데이터에서는 바로 직전 행의 molten_temp 값으로 대치"
     ),
     "row_emergency_stop": (
-        "### 행 제거 — emergency_stop\n"
         "- emergency_stop이 결측인 경우 1번 존재, 이때 이 행의 나머지 칼럼들 대부분 결측 → 학습 데이터에서 행 제거\n"
         "- 모델 예측이 끝난 뒤, emergency_stop 값을 확인해서 결측인 경우 불량으로 나오도록 함"
     ),
     "row_count_dup": (
-        "### 행 제거 — count 중복\n"
         "- count, mold_code, time, molten_volume 등이 겹치는 경우 다른 모든 변수들도 같은 값을 가짐\n"
         "- 정보 중복을 피하기 위해 하나만 남기고 나머지 중복 행들 삭제"
     ),
@@ -109,6 +105,20 @@ def panel_body():
         .left-col { padding-right: 1rem; border-right: 1px solid #eee; }
         .right-col { padding-left: 1rem; }
         .muted { color: #6c757d; }
+         /* 탭 메뉴 색상 변경 */
+        .nav-tabs .nav-link {
+            background-color: #2A2D30;
+            color: white;
+            border: none;
+            margin-right: 4px;
+        }
+        .nav-tabs .nav-link:hover {
+            background-color: #686f7d;
+        }
+        .nav-tabs .nav-link.active {
+            background-color: #6c6a6a;
+            color: white;
+        }
         /* 상단 툴바 */
         .topbar{
             display:flex; justify-content:space-between; align-items:center;
@@ -253,8 +263,13 @@ def panel_body():
                             "heating_furnace 열",
                             two_col(
                                 ui.div(
-                                    ui.markdown(DETAILS["drop_heating_furnace"]),
-                                    ui.output_plot("hf_hist", width="100%", height="360px"),
+                                     ui.img(src="heating_furnace.png", style="width: 100%; height: auto;"),
+                                    ui.div(
+                                        ui.HTML('<i class="fa-solid fa-circle-xmark" style="color: #dc3545; margin-right: 8px;"></i>'),
+                                        ui.span("제거 이유: ", style="font-weight: 700; color: #dc3545; font-size: 15px;"),
+                                        ui.span(DETAILS["drop_heating_furnace"], style="color: #495057; font-size: 14px;"),
+                                        style="background: #fff5f5; border-left: 4px solid #dc3545; padding: 12px 16px; border-radius: 6px; margin-top: 12px; display: flex; align-items: flex-start;"
+                                    ),
                                     style="display:flex; flex-direction:column; gap:.5rem;"
                                 ),
                                 ui.div(
@@ -438,33 +453,6 @@ def server(input, output, session):
         return df.dropna(subset=["molten_volume", "count", "mold_code"])
 
 
-    # ── (단일 칼럼) heating_furnace: A/B/NaN 개수 바 차트 ─────────────────────
-    @output
-    @render.plot
-    def hf_hist():
-        df = _raw_df()
-        if "heating_furnace" not in df.columns:
-            fig = plt.figure(figsize=(4, 2))
-            plt.text(0.5, 0.5, "heating_furnace 열이 없습니다.", ha="center", va="center")
-            plt.axis("off")
-            return fig
-
-        s = df["heating_furnace"]
-        # NaN을 문자열 "NaN"으로 치환 후 개수 집계
-        s = s.where(~s.isna(), "NaN")
-        vc = s.value_counts(dropna=False)  # A/B/NaN
-        labels = vc.index.tolist()
-        values = vc.values
-
-        fig, ax = plt.subplots(figsize=(9, 3.6))
-        bars = ax.bar(labels, values, color=["#4c78a8", "#72b7b2", "#bcbddc"])
-        ax.set_ylabel("Count")
-        ax.set_title("heating_furnace 분포 (A/B/NaN)")
-
-        for rect, val in zip(bars, values):
-            ax.text(rect.get_x() + rect.get_width()/2, rect.get_height(),
-                    f"{int(val):,}", ha="center", va="bottom", fontsize=10)
-        return fig
     
     # --- heating_furnace: 특정 인덱스 구간(73406–73413) + 그룹 색상 표시 ---
     @output
