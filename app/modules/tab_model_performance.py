@@ -342,9 +342,8 @@ def _generate_mock_importance(model_name: str) -> pd.DataFrame:
     entry = mock_data.get(model_name, mock_data["LightGBM"])
     return pd.DataFrame(entry)
 
-def panel():
-    return ui.nav_panel(
-        "모델 성능 평가",
+def panel_body():
+    return ui.TagList(
         ui.HTML(custom_css),
         ui.div(
             ui.div(
@@ -380,6 +379,9 @@ def panel():
         ),
     )
 
+
+def panel():
+    return ui.nav_panel("모델 성능 평가", panel_body())
 def server(input, output, session):
     active_metric = reactive.Value("ROC-AUC")
 

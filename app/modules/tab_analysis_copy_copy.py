@@ -1,4 +1,4 @@
-from shiny import App, ui, render, reactive
+﻿from shiny import App, ui, render, reactive
 import pandas as pd
 import numpy as np
 import joblib
@@ -14,7 +14,7 @@ MODEL_FILE = BASE_DIR / "data" / "models" / "v1" / "LightGBM_v1.pkl"
 df = pd.read_csv(DATA_FILE, encoding="utf-8", low_memory=False)
 artifact = joblib.load(MODEL_FILE)
 
-lgb_model = artifact["model"]
+model = artifact["model"]
 scaler = artifact.get("scaler")
 ordinal_encoder = artifact.get("ordinal_encoder")
 onehot_encoder = artifact.get("onehot_encoder")
@@ -33,9 +33,10 @@ categorical_cols = categorical_cols_model
 all_cols = all_model_cols
 
 COLUMN_NAMES_KR = {
+    "registration_time": "등록 일시",
     "count": "생산 순번",
     "working": "가동 여부",
-    "molten_temp": "용탕 온도",
+    "emergency_stop": "비상 정지",
     "facility_operation_cycleTime": "설비 운영 사이클타임",
     "production_cycletime": "제품 생산 사이클타임",
     "low_section_speed": "저속 구간 속도",
@@ -44,21 +45,19 @@ COLUMN_NAMES_KR = {
     "biscuit_thickness": "비스킷 두께",
     "upper_mold_temp1": "상부 금형 온도1",
     "upper_mold_temp2": "상부 금형 온도2",
-    "upper_mold_temp3": "상부 금형 온도3",
     "lower_mold_temp1": "하부 금형 온도1",
     "lower_mold_temp2": "하부 금형 온도2",
-    "lower_mold_temp3": "하부 금형 온도3",
     "sleeve_temperature": "슬리브 온도",
     "physical_strength": "물리적 강도",
     "Coolant_temperature": "냉각수 온도",
     "EMS_operation_time": "전자교반 가동시간",
     "mold_code": "금형 코드",
-    "emergency_stop": "비상 정지",
     "tryshot_signal": "트라이샷 신호",
-    "hour": "시간",
-    "weekday": "요일",
-    "molten_temp_filled": "보간된 용탕 온도",
-    "molten_volume": "용탕량"
+    "molten_temp": "용탕 온도",
+    "uniformity": "균일도",
+    "mold_temp_udiff": "금형 온도차(상/하)",
+    "P_diff": "압력 차이",
+    "Cycle_diff": "사이클 시간 차이"
 }
 pass_reference = df[df.get("passorfail", 0) == 0].copy()
 if pass_reference.empty:
@@ -73,7 +72,7 @@ for col in numeric_cols:
     if not series.empty:
         NUMERIC_FEATURE_RANGES[col] = (float(series.min()), float(series.max()))
 
-explainer = shap.TreeExplainer(lgb_model)
+explainer = shap.TreeExplainer(model)
 
 def _resolve_expected_value(expected):
     if isinstance(expected, (list, tuple, np.ndarray)):
@@ -156,7 +155,12 @@ def compute_shap_contributions(feature_matrix):
 def predict_with_model(row_dict, compute_shap=False):
     input_df = build_input_dataframe(row_dict)
     feature_matrix = prepare_feature_matrix(input_df)
-    probability = float(lgb_model.predict(feature_matrix)[0])
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(feature_matrix)
+        probability = float(proba[0, 1] if proba.ndim == 2 else proba[0])
+    else:
+        raw_pred = model.predict(feature_matrix)
+        probability = float(raw_pred[0] if raw_pred.ndim else raw_pred)
     prediction = 1 if probability >= operating_threshold else 0
     forced_fail = False
     tryshot = row_dict.get("tryshot_signal")
@@ -470,7 +474,18 @@ body {
     padding: 24px 12px;
 }</style>
 <script>
-function toggleAccordion(id) { var c = document.getElementById(id); c.style.display = c.style.display === "none" ? "block" : "none"; }
+function toggleAnalysisAccordion(evt, id) {
+    if (evt) {
+        evt.preventDefault();
+        evt.stopPropagation();
+    }
+    const panel = document.getElementById(id);
+    if (!panel) {
+        return;
+    }
+    const isHidden = window.getComputedStyle(panel).display === 'none';
+    panel.style.display = isHidden ? 'block' : 'none';
+}
 function togglePredictionCard() { document.getElementById('draggable-prediction').classList.toggle('hidden'); }
 let isDragging = false, currentX, currentY, initialX, initialY, xOffset = 0, yOffset = 0;
 document.addEventListener('DOMContentLoaded', function() {
@@ -526,77 +541,78 @@ def create_widgets(cols, is_categorical=False):
             widgets.append(ui.div(ui.input_slider(col, label, min=meta["min"], max=meta["max"], value=meta["value"], step=meta["step"]), class_="input-item"))
     return widgets
 
-def panel():
+def panel_body():
     cat_widgets = create_widgets(categorical_cols, True)
     num_widgets = create_widgets(numeric_cols, False)
 
-    cat_rows = [ui.layout_columns(*cat_widgets[i:i+4], col_widths=[3,3,3,3]) for i in range(0, len(cat_widgets), 4)]
-    num_rows = [ui.layout_columns(*num_widgets[i:i+4], col_widths=[3,3,3,3]) for i in range(0, len(num_widgets), 4)]
+    cat_rows = [ui.layout_columns(*cat_widgets[i:i+4], col_widths=[3, 3, 3, 3]) for i in range(0, len(cat_widgets), 4)]
+    num_rows = [ui.layout_columns(*num_widgets[i:i+4], col_widths=[3, 3, 3, 3]) for i in range(0, len(num_widgets), 4)]
 
-    return ui.nav_panel(
-        "예측 분석",
-        ui.page_fluid(
-            ui.HTML(custom_css),
+    return ui.page_fluid(
+        ui.HTML(custom_css),
+        ui.div(
             ui.div(
+                ui.div("예측 결과", class_="card-header", style="background: #2A2D30; color: white; padding: 16px 20px; border-radius: 16px 16px 0 0; font-weight: 600; cursor: move;"),
                 ui.div(
-                    ui.div("예측 결과", class_="card-header", style="background: #2A2D30; color: white; padding: 16px 20px; border-radius: 16px 16px 0 0; font-weight: 600; cursor: move;"),
-                    ui.div(
-                        ui.div(ui.output_ui("prediction_result"), style="margin-bottom: 12px; text-align: center; font-size: 24px; font-weight: 700;"),
-                        ui.div(ui.output_ui("probability_text"), style="margin-bottom: 12px; text-align: center; font-size: 14px; color: #495057;"),
-                        ui.div(ui.output_ui("shap_top_features"), style="margin-bottom: 12px; font-size: 13px; color: #495057;"),
-                        ui.div(ui.output_ui("recommendation_text"), style="margin-bottom: 16px; font-size: 13px; color: #495057;"),
-                        ui.input_action_button("predict", "불량 여부 예측", style="width: 100%; background: #dc3545; color: white; border: none; border-radius: 10px; padding: 12px 24px; font-weight: 600; margin-bottom: 10px;"),
-                        ui.input_action_button("load_defect_sample", "불량 샘플 랜덤 추출", style="width: 100%; background: #C2C0C0; color: #2c3e50; border: none; border-radius: 10px; padding: 12px 24px; font-weight: 600;"),
-                        style="background: white; padding: 20px; border-radius: 0 0 16px 16px;"
-                    )
-                ),
-                id="draggable-prediction",
-                style="position: fixed; bottom: 20px; right: 100px; width: 320px; z-index: 1000;"
+                    ui.div(ui.output_ui("prediction_result"), style="margin-bottom: 12px; text-align: center; font-size: 24px; font-weight: 700;"),
+                    ui.div(ui.output_ui("probability_text"), style="margin-bottom: 12px; text-align: center; font-size: 14px; color: #495057;"),
+                    ui.div(ui.output_ui("shap_top_features"), style="margin-bottom: 12px; font-size: 13px; color: #495057;"),
+                    ui.div(ui.output_ui("recommendation_text"), style="margin-bottom: 16px; font-size: 13px; color: #495057;"),
+                    ui.input_action_button("predict", "불량 여부 예측", style="width: 100%; background: #dc3545; color: white; border: none; border-radius: 10px; padding: 12px 24px; font-weight: 600; margin-bottom: 10px;"),
+                    ui.input_action_button("load_defect_sample", "불량 샘플 랜덤 추출", style="width: 100%; background: #C2C0C0; color: #2c3e50; border: none; border-radius: 10px; padding: 12px 24px; font-weight: 600;"),
+                    style="background: white; padding: 20px; border-radius: 0 0 16px 16px;"
+                )
             ),
-            ui.HTML('<div id="settings-button" style="position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; background: #2A2D30; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 1000; transition: transform 0.2s;"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></div>'),
+            id="draggable-prediction",
+            style="position: fixed; bottom: 20px; right: 100px; width: 320px; z-index: 1000;"
+        ),
+        ui.HTML('<div id="settings-button" style="position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; background: #2A2D30; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 1000; transition: transform 0.2s;"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></div>'),
+        ui.div(
             ui.div(
-                ui.div(
-                    ui.tags.button(
-                        ui.div(
-                            ui.span("변수 설정", style="font-size: 16px;"),
-                            ui.span("접기", style="font-size: 12px;"),
-                            style="display: flex; justify-content: space-between; width: 100%;"
-                        ),
-                        onclick="toggleAccordion('variables_content')",
-                        class_="accordion-header"
-                    ),
-                    ui.div(*cat_rows, *num_rows, id="variables_content", class_="accordion-content", style="display: block;"),
-                    class_="accordion-section",
-                    style="margin-bottom: 16px;"
-                ),
-                ui.div(
-                    ui.tags.button(
-                        ui.div(
-                            ui.span("불량 샘플", style="font-size: 16px;"),
-                            ui.span("접기", style="font-size: 12px;"),
-                            style="display: flex; justify-content: space-between; width: 100%;"
-                        ),
-                        onclick="toggleAccordion('defect_sample_content')",
-                        class_="accordion-header"
-                    ),
+                ui.tags.button(
                     ui.div(
-                        ui.output_ui("defect_sample_table"),
-                        ui.layout_columns(
-                            ui.div(ui.output_plot("shap_force_plot"), class_="shap-plot-card"),
-                            ui.div(ui.output_plot("shap_waterfall_plot"), class_="shap-plot-card"),
-                            col_widths=[6, 6]
-                        ),
-                        id="defect_sample_content",
-                        class_="accordion-content",
-                        style="display: block;"
+                        ui.span("변수 설정", style="font-size: 16px;"),
+                        ui.span("접기", style="font-size: 12px;"),
+                        style="display: flex; justify-content: space-between; width: 100%;"
                     ),
-                    class_="accordion-section"
+                    onclick="toggleAnalysisAccordion(event, 'variables_content')",
+                    class_="accordion-header",
+                    type="button"
                 ),
-                style="padding: 24px; max-width: 1400px; margin: 0 auto;"
-            )
+                ui.div(*cat_rows, *num_rows, id="variables_content", class_="accordion-content", style="display: block;"),
+                class_="accordion-section",
+                style="margin-bottom: 16px;"
+            ),
+            ui.div(
+                ui.tags.button(
+                    ui.div(
+                        ui.span("불량 샘플", style="font-size: 16px;"),
+                        ui.span("접기", style="font-size: 12px;"),
+                        style="display: flex; justify-content: space-between; width: 100%;"
+                    ),
+                    onclick="toggleAnalysisAccordion(event, 'defect_sample_content')",
+                    class_="accordion-header",
+                    type="button"
+                ),
+                ui.div(
+                    ui.output_ui("defect_sample_table"),
+                    ui.layout_columns(
+                        ui.div(ui.output_plot("shap_force_plot"), class_="shap-plot-card"),
+                        ui.div(ui.output_plot("shap_waterfall_plot"), class_="shap-plot-card"),
+                        col_widths=[6, 6]
+                    ),
+                    id="defect_sample_content",
+                    class_="accordion-content",
+                    style="display: block;"
+                ),
+                class_="accordion-section"
+            ),
+            style="padding: 24px; max-width: 1400px; margin: 0 auto;"
         )
     )
 
+def panel():
+    return ui.nav_panel("예측 분석", panel_body())
 def server(input, output, session):
     prediction_state = reactive.Value(None)
     active_sample = reactive.Value(None)
