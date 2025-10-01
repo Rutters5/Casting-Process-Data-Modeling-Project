@@ -1,4 +1,5 @@
-﻿from shiny import App, render, ui
+﻿from pathlib import Path
+from shiny import App, render, ui
 from modules import (
     tab_analysis_copy_copy as tab_analysis_copy,
     tab_model_performance,
@@ -368,7 +369,8 @@ def server(input, output, session):
     tab_preprocessing.server(input, output, session)
 
 
-app = App(app_ui, server)
+static_path = Path(__file__).parent / "data" / "png"
+app = App(app_ui, server, static_assets=str(static_path))
 
 
 
