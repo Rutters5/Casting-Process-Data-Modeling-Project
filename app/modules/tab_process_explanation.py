@@ -14,8 +14,11 @@ DATA_FILE = BASE_DIR / "data" / "raw" / "train.csv"
 
 df = pd.read_csv(DATA_FILE, encoding="utf-8", low_memory=False)
 df['mold_code'] = df['mold_code'].astype(str)
-df['passorfail'] = df['passorfail'].astype(str)
 df['registration_time'] = pd.to_datetime(df['registration_time'])
+
+# passorfail 처리 (숫자형으로 유지)
+if 'passorfail' in df.columns:
+    df['passorfail'] = pd.to_numeric(df['passorfail'], errors='coerce')
 
 # 날짜 정보 생성
 df['date'] = df['registration_time'].dt.date
@@ -76,19 +79,53 @@ def create_empty_plot(message, figsize=(7, 4)):
 CUSTOM_CSS_JS = """
 <style>
 body { font-family: -apple-system, sans-serif; background-color: #f5f7fa; }
-.floating-panel { position: fixed; bottom: 20px; left: 20px; width: 350px; background: white; 
-    border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); z-index: 1000; 
-    max-height: 80vh; overflow: hidden; transition: all 0.3s ease; }
-.floating-panel-header { background: #2A2D30; color: white; padding: 20px 24px; 
-    border-radius: 16px 16px 0 0; font-weight: 600; font-size: 16px; cursor: move; user-select: none; }
-.floating-panel-content { padding: 20px 24px; background: white; border-radius: 0 0 16px 16px; 
-    max-height: calc(80vh - 60px); overflow-y: auto; }
+.floating-panel { 
+    position: fixed; 
+    bottom: 20px; 
+    left: 20px; 
+    width: 350px; 
+    background: white; 
+    border-radius: 16px; 
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15); 
+    z-index: 1000; 
+    max-height: 80vh; 
+    overflow: hidden; 
+}
+.floating-panel-header { 
+    background: #2A2D30; 
+    color: white; 
+    padding: 20px 24px; 
+    border-radius: 16px 16px 0 0; 
+    font-weight: 600; 
+    font-size: 16px; 
+    cursor: move; 
+    user-select: none; 
+}
+.floating-panel-content { 
+    padding: 20px 24px; 
+    background: white; 
+    border-radius: 0 0 16px 16px; 
+    max-height: calc(80vh - 60px); 
+    overflow-y: auto; 
+}
 .floating-panel-content p { font-size: 0.85em; color: #666; margin-bottom: 15px; }
 .floating-panel-content hr { margin: 15px 0; border: none; border-top: 1px solid #eee; }
-#toggle-button { position: fixed; bottom: 20px; left: 390px; width: 50px; height: 50px; 
-    background: #2A2D30; border-radius: 50%; display: flex; align-items: center; 
-    justify-content: center; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
-    z-index: 1000; transition: all 0.2s; }
+#toggle-button { 
+    position: fixed; 
+    bottom: 20px; 
+    left: 390px; 
+    width: 50px; 
+    height: 50px; 
+    background: #2A2D30; 
+    border-radius: 50%; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    cursor: pointer; 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
+    z-index: 1000; 
+    transition: all 0.2s; 
+}
 #toggle-button:hover { transform: scale(1.1); background: #1f2428; }
 #toggle-button svg { transition: transform 0.3s ease; }
 #toggle-button.panel-hidden svg { transform: rotate(180deg); }
@@ -96,41 +133,77 @@ body { font-family: -apple-system, sans-serif; background-color: #f5f7fa; }
 .hidden { display: none !important; }
 </style>
 <script>
-function makeDraggable(el) {
-    let pos1=0,pos2=0,pos3=0,pos4=0;
-    const hdr = el.querySelector('.floating-panel-header');
-    if(hdr) hdr.onmousedown = dragStart;
-    function dragStart(e) {
-        e.preventDefault(); pos3=e.clientX; pos4=e.clientY;
-        document.onmouseup=dragEnd; document.onmousemove=drag;
+(function() {
+    'use strict';
+    
+    var dragState = {
+        isDragging: false,
+        startX: 0,
+        startY: 0,
+        offsetX: 0,
+        offsetY: 0
+    };
+    
+    function initDragAndToggle() {
+        var panel = document.querySelector('.floating-panel');
+        var header = panel ? panel.querySelector('.floating-panel-header') : null;
+        var toggleBtn = document.getElementById('toggle-button');
+        
+        if (header && !header.dataset.dragInit) {
+            header.dataset.dragInit = 'true';
+            
+            header.onmousedown = function(e) {
+                dragState.isDragging = true;
+                dragState.startX = e.clientX - dragState.offsetX;
+                dragState.startY = e.clientY - dragState.offsetY;
+                e.preventDefault();
+            };
+        }
+        
+        if (!document.body.dataset.mouseMoveInit) {
+            document.body.dataset.mouseMoveInit = 'true';
+            
+            document.onmousemove = function(e) {
+                if (dragState.isDragging && panel) {
+                    dragState.offsetX = e.clientX - dragState.startX;
+                    dragState.offsetY = e.clientY - dragState.startY;
+                    panel.style.transform = 'translate(' + dragState.offsetX + 'px, ' + dragState.offsetY + 'px)';
+                }
+            };
+            
+            document.onmouseup = function() {
+                dragState.isDragging = false;
+            };
+        }
+        
+        if (toggleBtn && !toggleBtn.dataset.toggleInit) {
+            toggleBtn.dataset.toggleInit = 'true';
+            
+            toggleBtn.onclick = function() {
+                if (panel) {
+                    var isHidden = panel.classList.contains('hidden');
+                    if (isHidden) {
+                        panel.classList.remove('hidden');
+                        toggleBtn.classList.remove('panel-hidden');
+                    } else {
+                        panel.classList.add('hidden');
+                        toggleBtn.classList.add('panel-hidden');
+                    }
+                }
+            };
+        }
     }
-    function drag(e) {
-        e.preventDefault();
-        pos1=pos3-e.clientX; pos2=pos4-e.clientY; pos3=e.clientX; pos4=e.clientY;
-        let t=el.offsetTop-pos2, l=el.offsetLeft-pos1;
-        t=Math.max(0,Math.min(t,window.innerHeight-el.offsetHeight));
-        l=Math.max(0,Math.min(l,window.innerWidth-el.offsetWidth));
-        el.style.top=t+"px"; el.style.left=l+"px";
-        el.style.bottom="auto"; el.style.right="auto";
-    }
-    function dragEnd() { document.onmouseup=null; document.onmousemove=null; }
-}
-function togglePanel() {
-    const p=document.querySelector('.floating-panel'), b=document.getElementById('toggle-button');
-    if(p.classList.contains('hidden')) {
-        p.classList.remove('hidden'); b.classList.remove('panel-hidden');
+    
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initDragAndToggle);
     } else {
-        p.classList.add('hidden'); b.classList.add('panel-hidden');
+        initDragAndToggle();
     }
-}
-document.addEventListener('DOMContentLoaded',function(){
-    const p=document.querySelector('.floating-panel'),b=document.getElementById('toggle-button');
-    if(p)makeDraggable(p); if(b)b.addEventListener('click',togglePanel);
-});
-setTimeout(function(){
-    const p=document.querySelector('.floating-panel'),b=document.getElementById('toggle-button');
-    if(p)makeDraggable(p); if(b&&!b.onclick)b.addEventListener('click',togglePanel);
-},500);
+    
+    setTimeout(initDragAndToggle, 500);
+    setTimeout(initDragAndToggle, 1000);
+    setTimeout(initDragAndToggle, 2000);
+})();
 </script>
 """
 
@@ -240,16 +313,20 @@ def server(input, output, session):
     @output
     @render.text
     def data_info():
-        info = f"전체 데이터: {len(df):,}개"
+        info = f"전체 데이터 수: {len(df):,}개"
         if input.timeseries_mode():
             try:
                 filtered_df = get_filtered_data()
                 info += f"\n선택된 날짜 데이터: {len(filtered_df):,}개"
             except:
                 pass
-        for col in selected_vars():
-            missing = df[col].isnull().sum()
-            info += f"\n• {get_korean_name(col)}: {missing:,}개 ({missing/len(df)*100:.1f}%)"
+        
+        selected = selected_vars()
+        if selected:
+            info += "\n\n결측치 수:"
+            for col in selected:
+                missing = df[col].isnull().sum()
+                info += f"\n• {get_korean_name(col)}: {missing:,}개 ({missing/len(df)*100:.1f}%)"
         return info
     
     @output
@@ -290,6 +367,8 @@ def server(input, output, session):
         setup_matplotlib()
         v1, v2, ts = input.var1(), input.var2(), input.timeseries_mode()
         
+        has_passorfail = 'passorfail' in df.columns
+        
         # 시계열 모드
         if ts:
             if not v1:
@@ -297,35 +376,57 @@ def server(input, output, session):
             
             try:
                 selected_date = pd.to_datetime(input.selected_date()).date()
-                plot_df = df[df['date'] == selected_date][['registration_time', v1]].dropna()
+                cols_needed = ['registration_time', v1]
+                if has_passorfail:
+                    cols_needed.append('passorfail')
+                
+                plot_df = df[df['date'] == selected_date][cols_needed].copy()
                 date_label = str(selected_date)
             except:
-                plot_df = df[['registration_time', v1]].dropna()
+                cols_needed = ['registration_time', v1]
+                if has_passorfail:
+                    cols_needed.append('passorfail')
+                plot_df = df[cols_needed].copy()
                 date_label = "전체"
             
-            plot_df = plot_df.sort_values('registration_time')
+            plot_df = plot_df.dropna(subset=[v1])
             
             if len(plot_df) == 0:
                 return create_empty_plot('선택한 날짜에 데이터가 없습니다')
             
+            plot_df = plot_df.sort_values('registration_time')
+            
             fig, ax = plt.subplots(figsize=(10, 4))
             
-            # 수치형: 시간 단위 산점도
             if is_numeric_var(v1):
-                if len(plot_df) > 5000:
-                    plot_df = plot_df.sample(5000).sort_values('registration_time')
-                    title = f"{get_korean_name(v1)} - {date_label} (샘플 5,000개)"
+                if len(plot_df) > 3000:
+                    plot_df = plot_df.sample(3000, random_state=42).sort_values('registration_time')
+                    title = f"{get_korean_name(v1)} - {date_label} (샘플 3,000개)"
                 else:
                     title = f"{get_korean_name(v1)} - {date_label} (전체 {len(plot_df):,}개)"
                 
-                ax.scatter(plot_df['registration_time'], plot_df[v1], alpha=0.6, s=15, color='steelblue')
+                if has_passorfail:
+                    pass_data = plot_df[plot_df['passorfail'] == 0]
+                    fail_data = plot_df[plot_df['passorfail'] == 1]
+                    
+                    if not pass_data.empty:
+                        ax.scatter(pass_data['registration_time'], pass_data[v1], 
+                                 alpha=0.6, s=12, color='#28a745', label='양품', rasterized=True)
+                    if not fail_data.empty:
+                        ax.scatter(fail_data['registration_time'], fail_data[v1], 
+                                 alpha=0.6, s=12, color='#dc3545', label='불량', rasterized=True)
+                    if not pass_data.empty or not fail_data.empty:
+                        ax.legend(loc='upper right')
+                else:
+                    ax.scatter(plot_df['registration_time'], plot_df[v1], 
+                             alpha=0.6, s=12, color='steelblue', rasterized=True)
+                
                 ax.set_ylabel(get_korean_name(v1), fontsize=11)
                 ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
                 plt.xticks(rotation=45, ha='right', fontsize=9)
                 ax.set_title(title, fontsize=12, pad=15)
             
-            # 범주형: 시간별 막대그래프
             else:
                 plot_df['hour'] = plot_df['registration_time'].dt.hour
                 counts = plot_df.groupby(['hour', v1]).size().unstack(fill_value=0)
@@ -347,11 +448,37 @@ def server(input, output, session):
         
         fig, ax = plt.subplots(figsize=(6, 3.5))
         
-        # 동일 변수: 히스토그램
         if v1 == v2:
             if is_numeric_var(v1):
-                data_clean = df[v1].dropna()
-                ax.hist(data_clean, bins=30, alpha=0.7, edgecolor='black', color='steelblue')
+                if has_passorfail:
+                    pass_data = df[df['passorfail'] == 0][v1].dropna()
+                    fail_data = df[df['passorfail'] == 1][v1].dropna()
+                    
+                    if not pass_data.empty or not fail_data.empty:
+                        all_data = pd.concat([pass_data, fail_data])
+                        bins = np.histogram_bin_edges(all_data, bins=30)
+                        
+                        data_list = []
+                        colors_list = []
+                        labels_list = []
+                        
+                        if not pass_data.empty:
+                            data_list.append(pass_data)
+                            colors_list.append('#28a745')
+                            labels_list.append('양품')
+                        if not fail_data.empty:
+                            data_list.append(fail_data)
+                            colors_list.append('#dc3545')
+                            labels_list.append('불량')
+                        
+                        ax.hist(data_list, bins=bins, alpha=0.7, 
+                               edgecolor='black', color=colors_list,
+                               label=labels_list, stacked=True)
+                        ax.legend(loc='upper right')
+                else:
+                    data_clean = df[v1].dropna()
+                    ax.hist(data_clean, bins=30, alpha=0.7, edgecolor='black', color='steelblue')
+                
                 ax.set_xlabel(get_korean_name(v1), fontsize=10)
                 ax.set_ylabel('빈도', fontsize=10)
             else:
@@ -367,23 +494,44 @@ def server(input, output, session):
             ax.set_title(f"{get_korean_name(v1)} 분포", fontsize=11, pad=15)
             ax.grid(axis='y', alpha=0.3)
         
-        # 다른 변수
         else:
             n1, n2 = is_numeric_var(v1), is_numeric_var(v2)
             
-            if n1 and n2:  # 산점도
-                plot_df = df[[v1, v2]].dropna()
+            if n1 and n2:
+                if has_passorfail:
+                    plot_df = df[[v1, v2, 'passorfail']].dropna()
+                else:
+                    plot_df = df[[v1, v2]].dropna()
+                
                 if len(plot_df) > 10000:
                     plot_df = plot_df.sample(10000)
-                ax.scatter(plot_df[v1], plot_df[v2], alpha=0.5, s=10, color='steelblue')
-                corr = plot_df[v1].corr(plot_df[v2])
+                
+                if has_passorfail:
+                    pass_data = plot_df[plot_df['passorfail'] == 0]
+                    fail_data = plot_df[plot_df['passorfail'] == 1]
+                    
+                    if not pass_data.empty:
+                        ax.scatter(pass_data[v1], pass_data[v2], 
+                                 alpha=0.5, s=10, color='#28a745', label='양품')
+                    if not fail_data.empty:
+                        ax.scatter(fail_data[v1], fail_data[v2], 
+                                 alpha=0.5, s=10, color='#dc3545', label='불량')
+                    if not pass_data.empty or not fail_data.empty:
+                        ax.legend(loc='upper right')
+                    
+                    corr = plot_df[v1].corr(plot_df[v2])
+                else:
+                    ax.scatter(plot_df[v1], plot_df[v2], alpha=0.5, s=10, color='steelblue')
+                    corr = plot_df[v1].corr(plot_df[v2])
+                
                 ax.text(0.05, 0.95, f'상관계수: {corr:.3f}', transform=ax.transAxes, fontsize=9,
                        verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+                
                 ax.set_xlabel(get_korean_name(v1), fontsize=10)
                 ax.set_ylabel(get_korean_name(v2), fontsize=10)
                 ax.set_title(f"{get_korean_name(v1)} vs {get_korean_name(v2)}", fontsize=11, pad=15)
             
-            elif n1 or n2:  # 박스플롯
+            elif n1 or n2:
                 num_col, cat_col = (v1, v2) if n1 else (v2, v1)
                 num_name, cat_name = (get_korean_name(v1), get_korean_name(v2)) if n1 else (get_korean_name(v2), get_korean_name(v1))
                 plot_df = df[[cat_col, num_col]].dropna()
@@ -398,7 +546,7 @@ def server(input, output, session):
                 ax.set_title(f"{cat_name}별 {num_name} 분포", fontsize=11, pad=15)
                 plt.xticks(rotation=45, ha='right', fontsize=8)
             
-            else:  # 히트맵
+            else:
                 plot_df = df[[v1, v2]].dropna()
                 for col in [v1, v2]:
                     if plot_df[col].nunique() > 10:
