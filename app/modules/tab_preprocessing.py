@@ -102,7 +102,7 @@ EVIDENCE_DESC = {
 # =========================
 # UI
 # =========================
-def panel():
+def panel_body():
     css = ui.head_content(
         ui.tags.style("""
             .card .nav { margin-bottom: 0.75rem; }
@@ -179,7 +179,7 @@ def panel():
             ui.column(6, right, class_="right-col"),
         )
 
-    return ui.nav_panel(
+    return ui.TagList(
         "데이터 전처리 요약",
         css,
 
@@ -390,6 +390,10 @@ def panel():
 # =========================
 # SERVER
 # =========================
+
+def panel():
+    return ui.nav_panel("데이터 전처리 요약", panel_body())
+
 def server(input, output, session):
 
     # ── DataFrames ────────────────────────────────────────────────────────────
@@ -984,3 +988,4 @@ def server(input, output, session):
                 b"trailer<< /Size 7 /Root 2 0 R >>\nstartxref\n408\n%%EOF\n"
             )
             yield minimal_pdf
+

@@ -137,9 +137,8 @@ setTimeout(function(){
 # =========================
 # UI 정의
 # =========================
-def panel():
-    return ui.nav_panel(
-        "EDA 분석",
+def panel_body():
+    return ui.TagList(
         ui.HTML(CUSTOM_CSS_JS),
         ui.HTML('''
             <div id="toggle-button">
@@ -182,6 +181,9 @@ def panel():
 # =========================
 # 서버 로직
 # =========================
+
+def panel():
+    return ui.nav_panel("EDA 분석", panel_body())
 def server(input, output, session):
     
     @output
