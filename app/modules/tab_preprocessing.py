@@ -104,73 +104,73 @@ EVIDENCE_DESC = {
 # =========================
 def panel():
     css = ui.head_content(
-    ui.tags.style("""
-        .card .nav { margin-bottom: 0.75rem; }
-        .left-col { padding-right: 1rem; border-right: 1px solid #eee; }
-        .right-col { padding-left: 1rem; }
-        .muted { color: #6c757d; }
-        /* 상단 툴바 */
-        .topbar{
-            display:flex; justify-content:space-between; align-items:center;
-            gap:.75rem; margin-bottom:.75rem;
-        }
-        .topbar .right{ display:flex; align-items:center; gap:.5rem; }
-        
-        /* PDF 버튼 호버 효과 */
-        .topbar button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4) !important;
-        }
-        .topbar button:active {
-            transform: translateY(0px);
-        }
-        
-        /* 접기 박스 */
-        details.details-box { margin-top: .75rem; }
-        details.details-box > summary { cursor: pointer; font-weight: 600; }
-        
-        /* 아코디언 스타일 */
-        .accordion-section { 
-            background: white; 
-            border-radius: 16px; 
-            margin-bottom: 20px; 
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
-            overflow: hidden;
-        }
-        .accordion-header { 
-            background: #2A2D30; 
-            color: white; 
-            padding: 20px 28px; 
-            cursor: pointer; 
-            display: flex; 
-            justify-content: space-between; 
-            border: none; 
-            width: 100%; 
-            text-align: left; 
-            font-size: 16px; 
-            font-weight: 600; 
-            border-radius: 16px 16px 0 0;
-        }
-        .accordion-header:hover { 
-            background-color: #1f2428;
-        }
-        .accordion-content { 
-            padding: 24px 28px; 
-            background: #ffffff; 
-            border-radius: 0 0 16px 16px;
-        }
-    """),
-    ui.tags.script("""
-        function toggleAccordion(id) {
-            var content = document.getElementById(id);
-            if (content.style.display === "none") {
-                content.style.display = "block";
-            } else {
-                content.style.display = "none";
+        ui.tags.style("""
+            .card .nav { margin-bottom: 0.75rem; }
+            .left-col { padding-right: 1rem; border-right: 1px solid #eee; }
+            .right-col { padding-left: 1rem; }
+            .muted { color: #6c757d; }
+            /* 상단 툴바 */
+            .topbar{
+                display:flex; justify-content:space-between; align-items:center;
+                gap:.75rem; margin-bottom:.75rem;
             }
-        }
-    """)
-)
+            .topbar .right{ display:flex; align-items:center; gap:.5rem; }
+            
+            /* PDF 버튼 호버 효과 */
+            .topbar button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4) !important;
+            }
+            .topbar button:active {
+                transform: translateY(0px);
+            }
+            
+            /* 접기 박스 */
+            details.details-box { margin-top: .75rem; }
+            details.details-box > summary { cursor: pointer; font-weight: 600; }
+            
+            /* 아코디언 스타일 */
+            .accordion-section { 
+                background: white; 
+                border-radius: 16px; 
+                margin-bottom: 20px; 
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
+                overflow: hidden;
+            }
+            .accordion-header { 
+                background: #2A2D30; 
+                color: white; 
+                padding: 20px 28px; 
+                cursor: pointer; 
+                display: flex; 
+                justify-content: space-between; 
+                border: none; 
+                width: 100%; 
+                text-align: left; 
+                font-size: 16px; 
+                font-weight: 600; 
+                border-radius: 16px 16px 0 0;
+            }
+            .accordion-header:hover { 
+                background-color: #1f2428;
+            }
+            .accordion-content { 
+                padding: 24px 28px; 
+                background: #ffffff; 
+                border-radius: 0 0 16px 16px;
+            }
+        """),
+        ui.tags.script("""
+            function toggleAccordion(id) {
+                var content = document.getElementById(id);
+                if (content.style.display === "none") {
+                    content.style.display = "block";
+                } else {
+                    content.style.display = "none";
+                }
+            }
+        """)
+    )
 
     # 공통 레이아웃: 각 카드마다 탭 + (왼쪽 텍스트 / 오른쪽 시각화)
     def two_col(left, right):
@@ -179,7 +179,51 @@ def panel():
             ui.column(6, right, class_="right-col"),
         )
 
-    
+    return ui.nav_panel(
+        "데이터 전처리 요약",
+        css,
+
+        # 상단 검색창 스타일 제목 + PDF 버튼
+        ui.div(
+            ui.div(
+                ui.HTML('<i class="fa-solid fa-magnifying-glass" style="color: #9ca3af; margin-right: 14px; font-size: 18px;"></i>'),
+                ui.span("데이터 전처리 요약", style="color: #6b7280; font-size: 16px; font-weight: 400;"),
+                style="""
+                    background: white;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 8px;
+                    padding: 10px 18px;
+                    display: flex;
+                    align-items: center;
+                    flex: 1;
+                    max-width: 500px;
+                """
+            ),
+            ui.div(
+                ui.download_button(
+                    "download_pdf", 
+                    ui.HTML('<i class="fa-solid fa-file-pdf"></i> PDF 다운로드'),
+                    style="""
+                        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+                        color: white;
+                        border: none;
+                        padding: 12px 24px;
+                        font-size: 15px;
+                        font-weight: 600;
+                        border-radius: 20px;
+                        box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+                        transition: all 0.3s ease;
+                        cursor: pointer;
+                        margin-right: 8px;
+                        margin-top: 4px;
+                    """
+                ),
+                class_="right"
+            ),
+            class_="topbar",
+            style="margin-bottom: 1.5rem; padding: 8px 0; display: flex; justify-content: space-between; align-items: center;"
+        ),
+
         # ───────────────────────────────────────────────
         # 1) 단일 칼럼 제거
         # ───────────────────────────────────────────────
